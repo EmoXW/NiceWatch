@@ -6,11 +6,11 @@ if CommandLine.arguments.contains("--selftest") {
     SelfTest.run()
     exit(0)
 } else if CommandLine.arguments.contains("--simulate") {
-    // 无界面演练：走与「用最新投稿演练」按钮完全相同的路径
+    // 无界面测试：走与「用最新投稿测试」按钮完全相同的路径
     Task { @MainActor in
         let model = AppModel.shared
         let result = await model.simulateNewVideo()
-        print("演练结果：\(result)")
+        print("测试结果：\(result)")
         exit(0)
     }
     RunLoop.main.run()

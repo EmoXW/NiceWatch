@@ -20,6 +20,11 @@ struct RootView: View {
             .padding(24)
         }
         .frame(minWidth: 780, minHeight: 580)
+        .sheet(item: $model.confirmation) { action in
+            SpectrumConfirmation(action: action,
+                                 onCancel: { model.confirmation = nil },
+                                 onConfirm: { model.confirmAction() })
+        }
     }
 }
 
@@ -346,7 +351,7 @@ struct MonitoredListView: View {
             Spacer()
 
             Toggle("", isOn: Binding(
-                get: { up.enabled },
+                get: { model.store.data.ups.first(where: { $0.mid == up.mid })?.enabled ?? false },
                 set: { model.setUPEnabled(mid: up.mid, enabled: $0) }
             ))
             .toggleStyle(SpectrumToggleStyle())
@@ -354,7 +359,7 @@ struct MonitoredListView: View {
             .accessibilityLabel("监控 \(up.name)")
 
             Button {
-                model.removeUP(mid: up.mid)
+                model.requestRemoveUP(mid: up.mid)
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 12))
@@ -375,6 +380,7 @@ struct AddUPView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     @State private var keyword = ""
+    @State private var removal: MonitoredUP?
 
     var body: some View {
         let p = SpectrumPalette.of(scheme)
@@ -454,6 +460,12 @@ struct AddUPView: View {
             }
             .padding(24)
         }
+        .sheet(item: $removal) { up in
+            SpectrumConfirmation(action: .removeUP(up), onCancel: { removal = nil }, onConfirm: {
+                model.removeUP(mid: up.mid)
+                removal = nil
+            })
+        }
         .task {
             if model.followings.isEmpty {
                 await model.refreshFollowings(page: 1)
@@ -499,7 +511,9 @@ struct AddUPView: View {
             Spacer()
             if monitored {
                 SpectrumTag(text: "已监测", icon: "checkmark.circle.fill", tint: p.success)
-                Button("取消") { model.removeUP(mid: mid) }
+                Button("取消监控") {
+                    removal = model.store.data.ups.first(where: { $0.mid == mid })
+                }
                     .buttonStyle(.spectrumCompact())
             } else {
                 Button("监测") {
@@ -713,7 +727,7 @@ struct SettingsView: View {
                     .buttonStyle(.spectrumCompact())
                     .disabled(busy)
 
-                    Button("用最新投稿演练") {
+                    Button("用最新投稿测试") {
                         busy = true
                         Task {
                             testResult = await model.simulateNewVideo()
@@ -824,8 +838,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SpectrumSectionTitle(title: "数据")
                 HStack(spacing: 10) {
-                    Button("清除演练记录") {
-                        _ = model.clearDrillRecords()
+                    Button("清除测试记录") {
+                        _ = model.clearTestRecords()
                     }
                     .buttonStyle(.spectrumCompact())
 
@@ -834,7 +848,15 @@ struct SettingsView: View {
                         .foregroundStyle(p.subtext)
                     Spacer()
                 }
-                Text(AppLog.dirURL.path)
+                HStack(spacing: 10) {
+                    Button("清除所有记录") { model.confirmation = .clearAllRecords }
+                        .buttonStyle(.spectrumCompact(.danger))
+                    Text("保留登录、设置与监控名单")
+                        .font(.system(size: 12))
+                        .foregroundStyle(p.subtext)
+                    Spacer()
+                }
+                Text(AppLog.dirURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(p.subtext)
                     .textSelection(.enabled)

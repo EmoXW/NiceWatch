@@ -37,17 +37,21 @@ struct UIPreview {
             _ = store.markSeen(v, state: state)
         }
         for scheme in [ColorScheme.light, .dark] {
-            for page in ["monitor", "timeline", "settings", "settings-window", "login", "add"] {
+            for page in ["monitor", "timeline", "settings", "settings-window", "login", "add", "confirm-remove", "confirm-clear"] {
                 let content: AnyView
                 switch page {
                 case "login": content = AnyView(LoginView())
                 case "add": content = AnyView(AddUPView())
+                case "confirm-remove":
+                    content = AnyView(SpectrumConfirmation(action: .removeUP(store.data.ups[0]), onCancel: {}, onConfirm: {}))
+                case "confirm-clear":
+                    content = AnyView(SpectrumConfirmation(action: .clearAllRecords, onCancel: {}, onConfirm: {}))
                 default:
                     let tab: MainTab = page == "timeline" ? .timeline : page.hasPrefix("settings") ? .settings : .monitor
                     content = AnyView(MainView(tab: tab))
                 }
-                let size = NSSize(width: page == "add" ? 580 : 820,
-                                  height: page == "settings" ? 1150 : page == "add" ? 500 : 640)
+                let size = NSSize(width: page.hasPrefix("confirm-") ? 520 : page == "add" ? 580 : 820,
+                                  height: page.hasPrefix("confirm-") ? 420 : page == "settings" ? 1250 : page == "add" ? 500 : 640)
                 let root = ZStack { SpectrumBackground(); content.padding(24) }
                     .environmentObject(model).environment(\.colorScheme, scheme)
                     .frame(width: size.width, height: size.height)
@@ -67,6 +71,6 @@ struct UIPreview {
                 window.orderOut(nil)
             }
         }
-        print("Rendered 12 previews to \(output.path)")
+        print("Rendered 16 previews to \(output.path)")
     }
 }

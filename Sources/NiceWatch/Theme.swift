@@ -112,7 +112,7 @@ extension View {
 }
 
 struct SpectrumButtonStyle: ButtonStyle {
-    enum Kind { case normal, prominent, danger }
+    enum Kind { case normal, prominent, danger, destructive }
     var kind: Kind = .normal
     var compact = false
 
@@ -134,7 +134,7 @@ struct SpectrumButtonStyle: ButtonStyle {
             let p = SpectrumPalette.of(scheme)
             configuration.label
                 .font(.system(size: compact ? 12 : 14, weight: .bold))
-                .foregroundStyle(kind == .prominent ? .white : (kind == .danger ? p.danger : p.text))
+                .foregroundStyle((kind == .prominent || kind == .destructive) ? .white : (kind == .danger ? p.danger : p.text))
                 .lineLimit(1)
                 .padding(.horizontal, compact ? 16 : 22)
                 .frame(height: compact ? 34 : 42)
@@ -153,6 +153,10 @@ struct SpectrumButtonStyle: ButtonStyle {
         }
 
         private func background(_ p: SpectrumPalette) -> Color {
+            if kind == .destructive {
+                if hovering || configuration.isPressed { return Color(hex: 0xAD0E0B) }
+                return scheme == .dark ? Color(hex: 0xB82019) : p.danger
+            }
             if kind == .prominent {
                 if configuration.isPressed { return Color(hex: 0x1E3FCC) }
                 return hovering ? Color(hex: 0x274DEA) : p.accent

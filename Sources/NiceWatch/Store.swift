@@ -1,9 +1,10 @@
 import Foundation
+import Combine
 
 /// JSON 文件持久化：~/Library/Application Support/NiceWatch/data.json
-final class Store {
+final class Store: ObservableObject {
 
-    var data: PersistedData
+    @Published var data: PersistedData
     private let fileURL: URL
 
     init(directory: URL? = nil) {

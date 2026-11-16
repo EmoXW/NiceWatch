@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ./build.sh release universal
-lipo -verify_arch arm64 x86_64 NiceWatch.app/Contents/MacOS/NiceWatch
+lipo NiceWatch.app/Contents/MacOS/NiceWatch -verify_arch arm64
+lipo NiceWatch.app/Contents/MacOS/NiceWatch -verify_arch x86_64
 codesign --verify --deep --strict NiceWatch.app
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' NiceWatch.app/Contents/Info.plist)
 OUTPUT_DIR="$(pwd)/dist"

@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
     /// 全局单例：AppKit 侧的窗口与 SwiftUI 侧的菜单项共用同一份状态
     static let shared = AppModel()
 
+    private var storeObservation: AnyCancellable?
+    private var recordGeneration = UUID()
     let store: Store
     private let notifierOverride: [Notifier]?
     private var checkOffset = 0
@@ -47,6 +49,7 @@ final class AppModel: ObservableObject {
     @Published var searchResults: [BiliClient.UserHit] = []
     @Published var searching = false
     @Published var toast: String?
+    @Published var confirmation: ConfirmationAction?
 
     /// 设置项的 UI 镜像（改动后调用 commitSettings 落盘）
     @Published var settings: Settings
@@ -56,6 +59,9 @@ final class AppModel: ObservableObject {
         self.notifierOverride = notifiers
         AppLog.info("AppModel.init 开始（数据目录：\(AppLog.dirURL.path)）")
         settings = store.data.settings
+        storeObservation = store.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         if restore {
             restoreSession()
             observeWake()
@@ -78,14 +84,36 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 清理「演练」产生的假记录，让时间线恢复干净
-    func clearDrillRecords() -> String {
+    /// 清理「测试」产生的假记录，让时间线恢复干净
+    func clearTestRecords() -> String {
         let before = store.data.seen.count
         store.data.seen = store.data.seen.filter { !$0.key.hasPrefix("BV1test") }
         store.save()
         let removed = before - store.data.seen.count
-        toast = "已清除 \(removed) 条演练记录"
+        toast = "已清除 \(removed) 条测试记录"
         return toast ?? ""
+    }
+
+    /// 清除记录而非恢复出厂设置：保留账号、推送配置与监控名单。
+    @discardableResult
+    func clearAllRecords() -> Bool {
+        let previous = store.data
+        let cutoff = Int(Date().timeIntervalSince1970)
+        store.data.seen.removeAll()
+        for index in store.data.ups.indices {
+            store.data.ups[index].baselinePubdate = max(store.data.ups[index].baselinePubdate, cutoff)
+            store.data.ups[index].lastNotifiedAt = nil
+            store.data.ups[index].lastSeenAt = nil
+        }
+        guard store.save() else {
+            store.data = previous
+            lastError = "清除记录失败，请检查数据目录是否可写"
+            return false
+        }
+        recordGeneration = UUID()
+        unreadCount = 0
+        toast = "已清除所有记录，监控将继续"
+        return true
     }
 
     func commitSettings() {
@@ -334,6 +362,7 @@ final class AppModel: ObservableObject {
             var skipped = 0
             let batch = Self.nextBatch(watched, offset: &checkOffset)
             for (idx, up) in batch.enumerated() {
+                guard store.data.ups.contains(where: { $0.mid == up.mid && $0.enabled }) else { continue }
                 // 风控退避：还没到允许时间就跳过，避免持续撞风控
                 if let until = up.backoffUntil, until > Date() {
                     skipped += 1
@@ -341,6 +370,7 @@ final class AppModel: ObservableObject {
                 }
                 do {
                     let vids = try await client.spaceVideos(mid: up.mid, pageSize: 10)
+                    guard store.data.ups.contains(where: { $0.mid == up.mid && $0.enabled }) else { continue }
                     found.append(contentsOf: vids)
                     AppLog.info("  \(up.name)：拉到 \(vids.count) 条投稿")
                     resetBackoff(mid: up.mid)
@@ -416,22 +446,25 @@ final class AppModel: ObservableObject {
     }
 
     /// 处理抓到的视频：判定新视频 → 推送 → 记录状态
-    /// - Parameter drill: 演练模式。为 true 时不做「是否属于已监控 UP」和「基线」过滤，
+    /// - Parameter drill: 测试模式。为 true 时不做「是否属于已监控 UP」和「基线」过滤，
     ///   只保留去重、静默时段、真实推送这几步——这样即使一个 UP 都没在监控，
     ///   也能完整验证推送链路。
     func process(videos: [VideoItem], drill: Bool = false, retryPending: Bool = true) async {
         guard !processingVideos else { return }
+        let generation = recordGeneration
         processingVideos = true
         defer { processingVideos = false }
         // 重试不依赖投稿是否仍在接口返回的最近十条中。
         let pending = store.data.seen.values.filter { retryPending && !drill && $0.state == .pending }
             .sorted { $0.detectedAt < $1.detectedAt }
         for rec in pending {
+            guard generation == recordGeneration else { return }
             if !drill && !store.data.ups.contains(where: { $0.mid == rec.mid && $0.enabled }) { continue }
             if inQuietHours() { continue }
             let video = VideoItem(bvid: rec.bvid, title: rec.title, author: rec.author,
                                   mid: rec.mid, pubdate: rec.pubdate, cover: "")
             await deliver(video, record: rec)
+            guard generation == recordGeneration else { return }
         }
         let watched = store.data.ups.filter { $0.enabled }
         let upMap = Dictionary(uniqueKeysWithValues: watched.map { ($0.mid, $0) })
@@ -447,10 +480,11 @@ final class AppModel: ObservableObject {
 
         let sorted = unique.values.sorted { $0.pubdate < $1.pubdate }
         for v in sorted {
+            guard generation == recordGeneration else { return }
             guard !store.hasSeen(v.bvid) else { continue }
 
             if !drill {
-                guard let up = upMap[v.mid] else { continue }
+                guard let up = store.data.ups.first(where: { $0.mid == v.mid && $0.enabled }) else { continue }
 
                 // 基线保护：明显早于该 UP 基线的视为历史视频，不推送
                 let floor = up.baselinePubdate > 0 ? up.baselinePubdate : Int(Date().timeIntervalSince1970) - 3600
@@ -471,6 +505,7 @@ final class AppModel: ObservableObject {
             }
 
             await deliver(v, record: rec)
+            guard generation == recordGeneration else { return }
         }
         store.pruneSeen()
         store.save()
@@ -487,6 +522,7 @@ final class AppModel: ObservableObject {
     }
 
     private func deliver(_ v: VideoItem, record rec: SeenVideo) async {
+        let generation = recordGeneration
         var rec = rec
         // 持久化失败时停止发送，避免生成无法恢复的推送。
         guard store.save() else {
@@ -510,9 +546,11 @@ final class AppModel: ObservableObject {
         for n in notifiers {
             do {
                 try await n.send(text: text)
+                guard generation == recordGeneration, store.hasSeen(v.bvid) else { return }
                 anySuccess = true
                 AppLog.info("已通过 \(n.name) 推送：\(v.bvid) \(v.title)")
             } catch {
+                guard generation == recordGeneration, store.hasSeen(v.bvid) else { return }
                 errors.append("\(n.name): \(error.localizedDescription)")
                 AppLog.info("\(n.name) 推送失败：\(error.localizedDescription)")
             }
@@ -618,6 +656,20 @@ final class AppModel: ObservableObject {
         toast = "已开始监控 \(name)"
     }
 
+    func requestRemoveUP(mid: Int64) {
+        guard let up = store.data.ups.first(where: { $0.mid == mid }) else { return }
+        confirmation = .removeUP(up)
+    }
+
+    func confirmAction() {
+        guard let action = confirmation else { return }
+        confirmation = nil
+        switch action {
+        case .removeUP(let up): removeUP(mid: up.mid)
+        case .clearAllRecords: clearAllRecords()
+        }
+    }
+
     func removeUP(mid: Int64) {
         store.data.ups.removeAll { $0.mid == mid }
         store.save()
@@ -694,35 +746,41 @@ final class AppModel: ObservableObject {
         return "部分成功（\(ok.joined(separator: "、"))）：" + bad.joined(separator: "；")
     }
 
-    /// 端到端演练：伪造一条"新视频"，走完整的检测管线（去重 → 基线过滤 → 静默判定 → 推送）
-    /// 演练：走一遍真实的「检测 → 去重 → 推送」管线。
+    /// 端到端测试：伪造一条"新视频"，走完整的检测管线（去重 → 基线过滤 → 静默判定 → 推送）
+    /// 测试：走一遍真实的「检测 → 去重 → 推送」管线。
     ///
     /// 有监控中的 UP 时，随机挑一个，取它最新的真实投稿来模拟；
     /// 没有监控中的 UP（或取不到投稿）时，才退回到完全伪造的一条。
     func simulateNewVideo() async -> String {
+        let generation = recordGeneration
         // 只在「正在监控」的 UP 里随机；一个都没有才回退到伪造数据
         let pool = store.data.ups.filter { $0.enabled }
 
         if let up = pool.randomElement() {
             do {
                 let vids = try await client.spaceVideos(mid: up.mid, pageSize: 10)
+                guard generation == recordGeneration else { return "记录已清除，本次测试已取消" }
+                guard store.data.ups.contains(where: { $0.mid == up.mid && $0.enabled }) else {
+                    return "该 UP 已暂停或取消监控，本次测试已取消"
+                }
                 if let latest = vids.max(by: { $0.pubdate < $1.pubdate }) {
-                    AppLog.info("演练：随机选中「\(up.name)」，用其最新投稿 \(latest.bvid)《\(latest.title)》模拟推送")
+                    AppLog.info("测试：随机选中「\(up.name)」，用其最新投稿 \(latest.bvid)《\(latest.title)》模拟推送")
                     // 这条视频本来已在 seen 里（基线），且发布时间早于基线，
-                    // 直接放进管线会被「已见过 / 基线过滤」拦掉，演练就测不到推送路径。
+                    // 直接放进管线会被「已见过 / 基线过滤」拦掉，测试就测不到推送路径。
                     // 因此清掉它的记录并把时间改成「刚刚」，让它真正走完整条链路。
                     store.data.seen.removeValue(forKey: latest.bvid)
                     await process(videos: [latest], drill: true)
                     return describeResult(bvid: latest.bvid, isReal: true)
                 }
-                AppLog.info("演练：「\(up.name)」暂无投稿，回退到伪造视频")
+                AppLog.info("测试：「\(up.name)」暂无投稿，回退到伪造视频")
             } catch let e as BiliError where e.isLoginExpired {
                 return "登录已失效，请重新扫码后再试"
             } catch {
-                AppLog.info("演练：拉取「\(up.name)」投稿失败（\(error.localizedDescription)），回退到伪造视频")
+                AppLog.info("测试：拉取「\(up.name)」投稿失败（\(error.localizedDescription)），回退到伪造视频")
             }
         }
 
+        guard generation == recordGeneration else { return "记录已清除，本次测试已取消" }
         // 兜底：完全伪造一条
         let suffix = String(Int(Date().timeIntervalSince1970) % 100000)
         let bvid = "BV1test\(suffix)"
@@ -732,7 +790,7 @@ final class AppModel: ObservableObject {
                              mid: 0,
                              pubdate: Int(Date().timeIntervalSince1970),
                              cover: "")
-        AppLog.info("演练：没有监控中的 UP，改用伪造视频 \(bvid) → 进入检测管线")
+        AppLog.info("测试：没有监控中的 UP，改用伪造视频 \(bvid) → 进入检测管线")
         await process(videos: [fake], drill: true)
         return describeResult(bvid: bvid, isReal: false)
     }

@@ -22,7 +22,7 @@
 - **扫码登录** — 用手机 B站 App 扫一下就行，不需要账号密码
 - **两种添加方式** — 从「我的关注」列表一键监测，或直接搜索 UP 主名字
 - **真实更新才推** — 添加时自动建立基线，不会把历史视频一股脑推给你
-- **推送演练** — 一键用「监控中 UP 的最新真实投稿」走完整推送链路，验证手机能不能收到
+- **推送测试** — 一键用「监控中 UP 的最新真实投稿」走完整推送链路，验证手机能不能收到
 - **静默时段** — 夜里不想被吵就设个时间段，期间只记录不推送
 - **风控友好** — 逐 UP 串行请求 + 指数退避，撞到风控自动降速，不会越撞越死
 - **登录态加密落盘** — AES-GCM 加密，密钥绑定本机硬件，不用系统钥匙串
@@ -102,11 +102,17 @@ open NiceWatch.app
 
 #### 设置
 
-![浅色设置界面，更多设置可向下滚动](docs/images/settings-light.png)
+![浅色设置界面与记录清理操作](docs/images/settings-light.png)
 
 #### 添加 UP 主
 
 ![添加 UP 主](docs/images/add-up-light.png)
+
+#### 操作确认
+
+![删除监控确认](docs/images/confirm-remove-light.png)
+
+![清除记录确认](docs/images/confirm-clear-dark.png)
 
 </details>
 
@@ -125,6 +131,8 @@ open NiceWatch.app
 | **设置** | 账号、Bark key、通知模板、检查间隔、静默时段、开机自启、数据目录 |
 
 菜单栏图标点开可以快速查看状态、立即检查或打开主窗口。
+
+暂停和恢复立即更新监控状态；删除监控需要确认，已有记录会保留。设置的「数据」区可清除测试记录，或在二次确认后清除所有记录。清除所有记录保留登录、Bark key、其他设置和监控名单，并以清除时刻作为历史截止时间，避免旧投稿重复推送。已发出的通知无法撤回。
 
 ## 工作原理
 
@@ -211,7 +219,7 @@ swift test                          # 离线监控可靠性回归测试
 swift run NiceWatch --selftest       # 7 项接口与配置自检
 swift run NiceWatch --storetest      # 持久化往返回归测试
 swift run NiceWatch --backofftest    # 风控退避曲线测试
-swift run NiceWatch --simulate       # 走一遍完整推送链路（等同设置页的演练按钮）
+swift run NiceWatch --simulate       # 走一遍完整推送链路（等同设置页的测试按钮）
 ```
 
 开发辅助工具：
