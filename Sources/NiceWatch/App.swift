@@ -8,7 +8,7 @@ struct NiceWatchApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent()
+            MenuContent(openMainWindow: { appDelegate.showMainWindow() })
                 .environmentObject(model)
         } label: {
             Image(nsImage: IconArtwork.menuBarImage(unread: model.unreadCount > 0))
@@ -20,9 +20,10 @@ struct NiceWatchApp: App {
 /// 主窗口由 AppKit 直接管理：
 /// 纯 MenuBarExtra 应用里 SwiftUI 的 Window scene 不会在启动时自动创建，
 /// 导致视图 onAppear 不触发、扫码流程永远不启动。
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private var window: NSWindow?
+    private let mainWindow = MainWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.info("applicationDidFinishLaunching")
@@ -43,28 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showMainWindow() {
-        AppLog.info("showMainWindow 调用")
-        if let w = window {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-        let hosting = NSHostingController(rootView: RootView().environmentObject(AppModel.shared))
-        let w = NSWindow(contentViewController: hosting)
-        w.title = "NiceWatch"
-        w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-        w.setContentSize(NSSize(width: 820, height: 640))
-        w.center()
-        w.isReleasedWhenClosed = false
-        // 让画布铺满标题栏，保持统一的 Spectrum 2 背景。
-        w.titlebarAppearsTransparent = true
-        w.titleVisibility = .hidden
-        w.backgroundColor = NSColor.windowBackgroundColor
-        w.isMovableByWindowBackground = true
-        window = w
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        AppLog.info("主窗口已创建并显示")
+        mainWindow.present()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -73,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct MenuContent: View {
+    let openMainWindow: () -> Void
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -94,7 +80,7 @@ struct MenuContent: View {
         .disabled(!model.isLoggedIn || model.isChecking)
 
         Button("打开主窗口") {
-            (NSApp.delegate as? AppDelegate)?.showMainWindow()
+            openMainWindow()
         }
 
         Divider()

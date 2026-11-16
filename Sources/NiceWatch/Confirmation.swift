@@ -41,6 +41,7 @@ struct SpectrumConfirmation: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
     @Environment(\.colorScheme) private var scheme
+    @FocusState private var cancelFocused: Bool
 
     var body: some View {
         let p = SpectrumPalette.of(scheme)
@@ -66,6 +67,7 @@ struct SpectrumConfirmation: View {
                 Button("取消", action: onCancel)
                     .buttonStyle(.spectrumCompact())
                     .keyboardShortcut(.cancelAction)
+                    .focused($cancelFocused)
                 Button(action.confirmLabel, role: .destructive, action: onConfirm)
                     .buttonStyle(.spectrumCompact(.destructive))
             }
@@ -74,8 +76,44 @@ struct SpectrumConfirmation: View {
         .padding(28)
         .frame(width: 440, alignment: .leading)
         .spectrumSurface(radius: 24)
-        .padding(16)
-        .background(p.base)
-        .interactiveDismissDisabled()
+        .accessibilityElement(children: .contain)
+        .onAppear { cancelFocused = true }
+        .onExitCommand(perform: onCancel)
+    }
+}
+
+/// 在当前窗口内呈现，保留卡片本身，不再创建带系统外壳的 sheet。
+private struct SpectrumConfirmationOverlay: ViewModifier {
+    let action: ConfirmationAction?
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .disabled(action != nil)
+            .allowsHitTesting(action == nil)
+            .accessibilityHidden(action != nil)
+            .overlay {
+                if let action {
+                    ZStack {
+                        Color.black.opacity(0.32)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { } // 点击遮罩不穿透，也不触发破坏性操作。
+                            .accessibilityHidden(true)
+                        SpectrumConfirmation(action: action, onCancel: onCancel, onConfirm: onConfirm)
+                            .padding(24)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+    }
+}
+
+extension View {
+    func spectrumConfirmation(action: ConfirmationAction?,
+                              onCancel: @escaping () -> Void,
+                              onConfirm: @escaping () -> Void) -> some View {
+        modifier(SpectrumConfirmationOverlay(action: action, onCancel: onCancel, onConfirm: onConfirm))
     }
 }

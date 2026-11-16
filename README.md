@@ -110,6 +110,8 @@ open NiceWatch.app
 
 #### 操作确认
 
+使用应用内居中卡片，背景变暗并禁用；仅保留一层圆角面板，支持 Escape 取消。
+
 ![删除监控确认](docs/images/confirm-remove-light.png)
 
 ![清除记录确认](docs/images/confirm-clear-dark.png)
@@ -245,7 +247,8 @@ swiftc -parse-as-library $(find Sources/NiceWatch -name '*.swift' ! -name main.s
 ```
 Sources/NiceWatch/
 ├── main.swift           入口（--selftest / --storetest / --backofftest / --simulate / GUI）
-├── App.swift            MenuBarExtra + AppKit 主窗口 + 单实例保护
+├── App.swift            MenuBarExtra + 应用生命周期 + 单实例保护
+├── MainWindowController.swift  主窗口创建、关闭后重开与前台显示
 ├── IconArtwork.swift    菜单栏模板图标（普通 / 未读）
 ├── AppModel.swift       核心状态机：登录、监控循环、去重、推送、退避
 ├── BiliAPI.swift        B站接口封装 + WBI 签名

@@ -43,16 +43,17 @@ struct UIPreview {
                 case "login": content = AnyView(LoginView())
                 case "add": content = AnyView(AddUPView())
                 case "confirm-remove":
-                    content = AnyView(SpectrumConfirmation(action: .removeUP(store.data.ups[0]), onCancel: {}, onConfirm: {}))
+                    content = AnyView(RootView())
                 case "confirm-clear":
-                    content = AnyView(SpectrumConfirmation(action: .clearAllRecords, onCancel: {}, onConfirm: {}))
+                    content = AnyView(RootView())
                 default:
                     let tab: MainTab = page == "timeline" ? .timeline : page.hasPrefix("settings") ? .settings : .monitor
                     content = AnyView(MainView(tab: tab))
                 }
-                let size = NSSize(width: page.hasPrefix("confirm-") ? 520 : page == "add" ? 580 : 820,
-                                  height: page.hasPrefix("confirm-") ? 420 : page == "settings" ? 1250 : page == "add" ? 500 : 640)
-                let root = ZStack { SpectrumBackground(); content.padding(24) }
+                model.confirmation = page == "confirm-remove" ? .removeUP(store.data.ups[0]) : page == "confirm-clear" ? .clearAllRecords : nil
+                let size = NSSize(width: page == "add" ? 580 : 820,
+                                  height: page == "settings" ? 1250 : page == "add" ? 500 : 640)
+                let root = ZStack { SpectrumBackground(); content.padding(page.hasPrefix("confirm-") ? 0 : 24) }
                     .environmentObject(model).environment(\.colorScheme, scheme)
                     .frame(width: size.width, height: size.height)
                 let hosting = NSHostingView(rootView: root)
@@ -64,6 +65,9 @@ struct UIPreview {
                 hosting.layoutSubtreeIfNeeded()
                 window.display()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+                if page.hasPrefix("confirm-") {
+                    precondition(window.attachedSheet == nil, "Confirmation must remain inside the app window")
+                }
                 guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { fatalError("Render failed") }
                 hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
                 let name = "\(page)-\(scheme == .dark ? "dark" : "light").png"

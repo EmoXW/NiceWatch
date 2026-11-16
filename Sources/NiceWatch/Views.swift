@@ -20,11 +20,9 @@ struct RootView: View {
             .padding(24)
         }
         .frame(minWidth: 780, minHeight: 580)
-        .sheet(item: $model.confirmation) { action in
-            SpectrumConfirmation(action: action,
-                                 onCancel: { model.confirmation = nil },
-                                 onConfirm: { model.confirmAction() })
-        }
+        .spectrumConfirmation(action: model.confirmation,
+                              onCancel: { model.confirmation = nil },
+                              onConfirm: { model.confirmAction() })
     }
 }
 
@@ -460,12 +458,11 @@ struct AddUPView: View {
             }
             .padding(24)
         }
-        .sheet(item: $removal) { up in
-            SpectrumConfirmation(action: .removeUP(up), onCancel: { removal = nil }, onConfirm: {
-                model.removeUP(mid: up.mid)
-                removal = nil
-            })
-        }
+        .spectrumConfirmation(action: removal.map(ConfirmationAction.removeUP), onCancel: { removal = nil }, onConfirm: {
+            guard let up = removal else { return }
+            removal = nil
+            model.removeUP(mid: up.mid)
+        })
         .task {
             if model.followings.isEmpty {
                 await model.refreshFollowings(page: 1)
