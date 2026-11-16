@@ -11,7 +11,7 @@ struct NiceWatchApp: App {
             MenuContent()
                 .environmentObject(model)
         } label: {
-            Image(systemName: model.unreadCount > 0 ? "bell.badge.fill" : "bell")
+            Image(nsImage: IconArtwork.menuBarImage(unread: model.unreadCount > 0))
         }
         .menuBarExtraStyle(.menu)
     }
@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.setContentSize(NSSize(width: 820, height: 640))
         w.center()
         w.isReleasedWhenClosed = false
-        // 让新拟态底色一直铺到标题栏下面，避免顶部出现一条白色
+        // 让画布铺满标题栏，保持统一的 Spectrum 2 背景。
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.backgroundColor = NSColor.windowBackgroundColor

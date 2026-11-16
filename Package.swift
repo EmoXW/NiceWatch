@@ -11,6 +11,7 @@ let package = Package(
         .executableTarget(
             name: "NiceWatch",
             path: "Sources/NiceWatch"
-        )
+        ),
+        .testTarget(name: "NiceWatchTests", dependencies: ["NiceWatch"])
     ]
 )

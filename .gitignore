@@ -31,3 +31,6 @@ login_qr.png
 .vscode/
 .idea/
 *.swp
+
+# 可从母版重新生成的图标尺寸导出
+Assets/AppIcon.iconset/

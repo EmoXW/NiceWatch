@@ -9,7 +9,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            NeuBackground()
+            SpectrumBackground()
             Group {
                 if model.isLoggedIn {
                     MainView()
@@ -17,7 +17,7 @@ struct RootView: View {
                     LoginView()
                 }
             }
-            .padding(18)
+            .padding(24)
         }
         .frame(minWidth: 780, minHeight: 580)
     }
@@ -30,25 +30,25 @@ struct LoginView: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
+        let p = SpectrumPalette.of(scheme)
         VStack(spacing: 22) {
             Spacer(minLength: 0)
 
             VStack(spacing: 5) {
                 Text("NiceWatch")
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .heavy))
                     .foregroundStyle(p.text)
                 Text("B站 UP 主更新监控 · Bark 推送到手机")
                     .font(.system(size: 12))
                     .foregroundStyle(p.subtext)
             }
 
-            // 二维码放在凹陷的软垫里
+            // 白色二维码卡片与浅色画布分层，确保扫码区域清晰。
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(p.base)
+                    .fill(p.surface)
                     .frame(width: 268, height: 268)
-                    .neuInset(radius: 24)
+                    .spectrumSurface(radius: 24)
 
                 if let img = model.qrImage {
                     Image(nsImage: img)
@@ -68,7 +68,7 @@ struct LoginView: View {
                             .font(.system(size: 46, weight: .light))
                             .foregroundStyle(p.subtext)
                         Text("点击下方按钮开始扫码登录")
-                            .font(.system(size: 11.5))
+                            .font(.system(size: 12))
                             .foregroundStyle(p.subtext)
                     }
                 }
@@ -82,18 +82,18 @@ struct LoginView: View {
                 Button(model.isLoggingIn ? "重新生成二维码" : "扫码登录 B站") {
                     model.beginLogin()
                 }
-                .buttonStyle(.neuProminent)
+                .buttonStyle(.spectrumProminent)
                 .frame(width: 200)
                 .keyboardShortcut(.defaultAction)
 
                 if case .success = model.qrState {
-                    NeuTag(text: "已登录", icon: "checkmark.seal.fill", tint: p.success)
+                    SpectrumTag(text: "已登录", icon: "checkmark.seal.fill", tint: p.success)
                 }
             }
 
-            Text("登录态仅以加密文件保存在本机应用目录（~/Library/Application Support/NiceWatch），不使用系统钥匙串。")
-                .font(.system(size: 10.5))
-                .foregroundStyle(p.subtext.opacity(0.8))
+            Text("使用哔哩哔哩 App 扫码并确认。登录信息加密保存在这台 Mac。")
+                .font(.system(size: 12))
+                .foregroundStyle(p.subtext)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 430)
 
@@ -126,14 +126,18 @@ enum MainTab: Hashable {
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
-    @State private var tab: MainTab = MainTab.initial
+    @State private var tab: MainTab
+
+    init(tab: MainTab = MainTab.initial) {
+        _tab = State(initialValue: tab)
+    }
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
-        VStack(spacing: 14) {
+        let p = SpectrumPalette.of(scheme)
+        VStack(spacing: 20) {
             header(p)
 
-            NeuSegmented(
+            SpectrumSegmented(
                 options: [
                     (MainTab.monitor, "监控", "dot.radiowaves.left.and.right"),
                     (MainTab.timeline, "时间线", "clock.arrow.circlepath"),
@@ -154,24 +158,23 @@ struct MainView: View {
     }
 
     @ViewBuilder
-    private func header(_ p: NeuPalette) -> some View {
+    private func header(_ p: SpectrumPalette) -> some View {
         HStack(spacing: 12) {
             HStack(spacing: 9) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(p.base)
-                        .frame(width: 30, height: 30)
-                        .neuRaised(radius: 10, distance: 3)
-                    Image(systemName: "bell.badge.fill")
+                        .fill(p.accentSoft)
+                        .frame(width: 40, height: 40)
+                    Image(nsImage: IconArtwork.menuBarImage(unread: false))
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(p.accent)
+                        .foregroundStyle(p.text)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("NiceWatch")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .font(.system(size: 20, weight: .heavy))
                         .foregroundStyle(p.text)
                     Text(model.account?.uname ?? "未登录")
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                 }
             }
@@ -185,7 +188,7 @@ struct MainView: View {
             } label: {
                 Label("立即检查", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.neuCompact())
+            .buttonStyle(.spectrumCompact())
             .disabled(model.isChecking)
         }
         .padding(.horizontal, 4)
@@ -197,7 +200,7 @@ struct StatusStrip: View {
     let lastCheck: Date?
     @Environment(\.colorScheme) private var scheme
 
-    private func color(_ p: NeuPalette) -> Color {
+    private func color(_ p: SpectrumPalette) -> Color {
         switch status {
         case .ok: return p.success
         case .idle: return p.subtext
@@ -207,24 +210,23 @@ struct StatusStrip: View {
     }
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
+        let p = SpectrumPalette.of(scheme)
         HStack(spacing: 6) {
             Circle()
                 .fill(color(p))
                 .frame(width: 7, height: 7)
-                .shadow(color: color(p).opacity(0.6), radius: 3)
             Text(status.text)
                 .font(.system(size: 11))
                 .foregroundStyle(p.subtext)
             if let lastCheck {
                 Text("· " + lastCheck.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(p.subtext.opacity(0.75))
+                    .font(.system(size: 12))
+                    .foregroundStyle(p.subtext)
             }
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
-        .neuInset(radius: 10)
+        .background(p.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -236,10 +238,18 @@ struct MonitoredListView: View {
     @State private var showPicker = false
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
-        VStack(spacing: 12) {
+        let p = SpectrumPalette.of(scheme)
+        VStack(spacing: 20) {
+            HStack(spacing: 12) {
+                overviewTile(title: "正在监控", value: "\(model.store.data.ups.filter { $0.enabled }.count)",
+                             icon: "dot.radiowaves.left.and.right", tint: p.accentText, p: p)
+                overviewTile(title: "已推送记录", value: "\(model.store.data.seen.values.filter { $0.state == .notified }.count)",
+                             icon: "checkmark.circle", tint: p.success, p: p)
+                overviewTile(title: "待推送", value: "\(model.store.data.seen.values.filter { $0.state == .pending }.count)",
+                             icon: "clock", tint: p.warning, p: p)
+            }
             HStack {
-                NeuSectionTitle(title: "监控中",
+                SpectrumSectionTitle(title: "监控列表",
                                 subtitle: "共 \(model.store.data.ups.count) 个 UP 主")
                 Spacer()
                 Button {
@@ -247,7 +257,7 @@ struct MonitoredListView: View {
                 } label: {
                     Label("添加 UP 主", systemImage: "plus")
                 }
-                .buttonStyle(.neuCompact(.prominent))
+                .buttonStyle(.spectrumCompact(.prominent))
             }
 
             if model.store.data.ups.isEmpty {
@@ -270,14 +280,33 @@ struct MonitoredListView: View {
         }
     }
 
-    private func emptyState(_ p: NeuPalette) -> some View {
+    private func overviewTile(title: String, value: String, icon: String,
+                              tint: Color, p: SpectrumPalette) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 42, height: 42)
+                .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(value).font(.system(size: 25, weight: .heavy)).foregroundStyle(p.text)
+                Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(p.subtext)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .spectrumSurface()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func emptyState(_ p: SpectrumPalette) -> some View {
         VStack(spacing: 14) {
             ZStack {
-                Circle().fill(p.base).frame(width: 76, height: 76)
-                    .neuRaised(radius: 38, distance: 6, strong: true)
+                Circle().fill(p.accentSoft).frame(width: 76, height: 76)
                 Image(systemName: "person.crop.circle.badge.plus")
                     .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(p.accent)
+                    .foregroundStyle(p.accentText)
             }
             Text("还没有监控任何 UP 主")
                 .font(.system(size: 15, weight: .semibold))
@@ -286,29 +315,29 @@ struct MonitoredListView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(p.subtext)
             Button("添加 UP 主") { showPicker = true }
-                .buttonStyle(.neuProminent)
+                .buttonStyle(.spectrumProminent)
                 .frame(width: 170)
                 .keyboardShortcut(.defaultAction)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func row(_ up: MonitoredUP, _ p: NeuPalette) -> some View {
+    private func row(_ up: MonitoredUP, _ p: SpectrumPalette) -> some View {
         HStack(spacing: 12) {
             AvatarView(url: up.faceURL, name: up.name, size: 38)
-                .neuRaised(radius: 19, distance: 3)
+                .spectrumSurface(radius: 19)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(up.name)
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(p.text)
                 HStack(spacing: 6) {
-                    NeuTag(text: up.enabled ? "监控中" : "已暂停",
+                    SpectrumTag(text: up.enabled ? "监控中" : "已暂停",
                            icon: up.enabled ? "dot.radiowaves.left.and.right" : "pause.fill",
                            tint: up.enabled ? p.success : p.warning)
                     if let t = up.lastNotifiedAt {
                         Text("上次推送 " + t.formatted(date: .omitted, time: .shortened))
-                            .font(.system(size: 10.5))
+                            .font(.system(size: 12))
                             .foregroundStyle(p.subtext)
                     }
                 }
@@ -320,8 +349,9 @@ struct MonitoredListView: View {
                 get: { up.enabled },
                 set: { model.setUPEnabled(mid: up.mid, enabled: $0) }
             ))
-            .toggleStyle(NeuToggleStyle())
+            .toggleStyle(SpectrumToggleStyle())
             .labelsHidden()
+            .accessibilityLabel("监控 \(up.name)")
 
             Button {
                 model.removeUP(mid: up.mid)
@@ -329,11 +359,12 @@ struct MonitoredListView: View {
                 Image(systemName: "trash")
                     .font(.system(size: 12))
             }
-            .buttonStyle(.neuCompact(.danger))
+            .buttonStyle(.spectrumCompact(.danger))
             .help("取消监控")
+            .accessibilityLabel("取消监控 \(up.name)")
         }
         .padding(14)
-        .neuRaised(radius: 16, strong: true)
+        .spectrumSurface(radius: 16)
     }
 }
 
@@ -346,9 +377,9 @@ struct AddUPView: View {
     @State private var keyword = ""
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
+        let p = SpectrumPalette.of(scheme)
         ZStack {
-            NeuBackground()
+            SpectrumBackground()
             VStack(spacing: 12) {
                 HStack {
                     Text("添加 UP 主")
@@ -356,14 +387,14 @@ struct AddUPView: View {
                         .foregroundStyle(p.text)
                     Spacer()
                     Button("完成") { dismiss() }
-                        .buttonStyle(.neuCompact())
+                        .buttonStyle(.spectrumCompact())
                 }
 
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundStyle(p.subtext)
-                    NeuField {
+                    SpectrumField {
                         TextField("搜索 UP 主名字，或从下方关注列表选择", text: $keyword)
                             .font(.system(size: 12.5))
                             .onSubmit { Task { await model.search(keyword: keyword) } }
@@ -372,7 +403,7 @@ struct AddUPView: View {
                     Button("搜索") {
                         Task { await model.search(keyword: keyword) }
                     }
-                    .buttonStyle(.neuCompact(.prominent))
+                    .buttonStyle(.spectrumCompact(.prominent))
                 }
 
                 ScrollView {
@@ -386,7 +417,7 @@ struct AddUPView: View {
                             } header: {
                                 sectionHeader("搜索结果", p: p) {
                                     Button("清除") { model.searchResults = [] }
-                                        .buttonStyle(.neuCompact())
+                                        .buttonStyle(.spectrumCompact())
                                 }
                             }
                         }
@@ -414,14 +445,14 @@ struct AddUPView: View {
                                 Button("加载更多") {
                                     Task { await model.loadMoreFollowings() }
                                 }
-                                .buttonStyle(.neuCompact())
+                                .buttonStyle(.spectrumCompact())
                             }
                         }
                     }
                     .padding(4)
                 }
             }
-            .padding(18)
+            .padding(24)
         }
         .task {
             if model.followings.isEmpty {
@@ -431,7 +462,7 @@ struct AddUPView: View {
     }
 
     private func sectionHeader(_ title: String,
-                               p: NeuPalette,
+                               p: SpectrumPalette,
                                @ViewBuilder trailing: () -> some View) -> some View {
         HStack {
             Text(title)
@@ -443,42 +474,42 @@ struct AddUPView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 6)
-        .background(NeuPalette.of(scheme).base.opacity(0.98))
+        .background(SpectrumPalette.of(scheme).base.opacity(0.98))
     }
 
     @ViewBuilder
     private func row(mid: Int64, name: String, face: String,
-                     subtitle: String, p: NeuPalette) -> some View {
+                     subtitle: String, p: SpectrumPalette) -> some View {
         let monitored = model.isMonitored(mid)
         HStack(spacing: 10) {
             AvatarView(url: URL(string: face.hasPrefix("//") ? "https:" + face : face),
                        name: name, size: 30)
-                .neuRaised(radius: 15, distance: 2)
+                .spectrumSurface(radius: 15)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(p.text)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                         .lineLimit(1)
                 }
             }
             Spacer()
             if monitored {
-                NeuTag(text: "已监测", icon: "checkmark.circle.fill", tint: p.success)
+                SpectrumTag(text: "已监测", icon: "checkmark.circle.fill", tint: p.success)
                 Button("取消") { model.removeUP(mid: mid) }
-                    .buttonStyle(.neuCompact())
+                    .buttonStyle(.spectrumCompact())
             } else {
                 Button("监测") {
                     Task { await model.addUP(mid: mid, name: name, face: face) }
                 }
-                .buttonStyle(.neuCompact(.prominent))
+                .buttonStyle(.spectrumCompact(.prominent))
             }
         }
         .padding(11)
-        .neuRaised(radius: 13)
+        .spectrumSurface(radius: 13)
     }
 }
 
@@ -489,29 +520,28 @@ struct TimelineView: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
+        let p = SpectrumPalette.of(scheme)
         let items = model.store.timeline
 
         VStack(spacing: 12) {
             HStack {
-                NeuSectionTitle(title: "时间线", subtitle: "最近 \(items.count) 条检测记录")
+                SpectrumSectionTitle(title: "时间线", subtitle: "最近 \(items.count) 条检测记录")
                 Spacer()
             }
 
             if items.isEmpty {
                 VStack(spacing: 12) {
                     ZStack {
-                        Circle().fill(p.base).frame(width: 70, height: 70)
-                            .neuRaised(radius: 35, distance: 5, strong: true)
+                        Circle().fill(p.accentSoft).frame(width: 70, height: 70)
                         Image(systemName: "clock")
                             .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(p.accent)
+                            .foregroundStyle(p.accentText)
                     }
                     Text("还没有检测到更新")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(p.text)
                     Text("每 \(Settings.intervalLabel(model.settings.intervalClamped))检查一次，发现新视频会立刻推送。")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -528,22 +558,22 @@ struct TimelineView: View {
         }
     }
 
-    private func row(_ item: SeenVideo, _ p: NeuPalette) -> some View {
+    private func row(_ item: SeenVideo, _ p: SpectrumPalette) -> some View {
         HStack(spacing: 11) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(p.text)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Text(item.author)
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                     Text("·")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(p.subtext.opacity(0.6))
+                        .font(.system(size: 12))
+                        .foregroundStyle(p.subtext)
                     Text(item.pubDate.formatted(date: .numeric, time: .shortened))
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                 }
             }
@@ -555,23 +585,24 @@ struct TimelineView: View {
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.neuCompact())
+            .buttonStyle(.spectrumCompact())
+            .accessibilityLabel("打开视频：\(item.title)")
         }
-        .padding(12)
-        .neuRaised(radius: 14)
+        .padding(16)
+        .spectrumSurface(radius: 14)
     }
 
     @ViewBuilder
-    private func stateTag(_ s: SeenVideo.State, _ p: NeuPalette) -> some View {
+    private func stateTag(_ s: SeenVideo.State, _ p: SpectrumPalette) -> some View {
         switch s {
         case .notified:
-            NeuTag(text: "已推送", icon: "checkmark.circle", tint: p.success)
+            SpectrumTag(text: "已推送", icon: "checkmark.circle", tint: p.success)
         case .pending:
-            NeuTag(text: "待推送", icon: "clock", tint: p.warning)
+            SpectrumTag(text: "待推送", icon: "clock", tint: p.warning)
         case .failed:
-            NeuTag(text: "失败", icon: "exclamationmark.triangle", tint: p.danger)
+            SpectrumTag(text: "失败", icon: "exclamationmark.triangle", tint: p.danger)
         case .muted:
-            NeuTag(text: "静默", icon: "moon.zzz")
+            SpectrumTag(text: "静默", icon: "moon.zzz")
         case .baseline:
             EmptyView()
         }
@@ -587,7 +618,7 @@ struct SettingsView: View {
     @State private var busy = false
 
     var body: some View {
-        let p = NeuPalette.of(scheme)
+        let p = SpectrumPalette.of(scheme)
         ScrollView {
             VStack(spacing: 14) {
                 accountCard(p)
@@ -596,9 +627,9 @@ struct SettingsView: View {
                 monitorCard(p)
                 dataCard(p)
                 if let err = model.lastError {
-                    NeuCard {
+                    SpectrumCard {
                         VStack(alignment: .leading, spacing: 6) {
-                            NeuSectionTitle(title: "最近错误")
+                            SpectrumSectionTitle(title: "最近错误")
                             Text(err)
                                 .font(.system(size: 11))
                                 .foregroundStyle(p.danger)
@@ -612,54 +643,53 @@ struct SettingsView: View {
     }
 
     // 账号
-    private func accountCard(_ p: NeuPalette) -> some View {
-        NeuCard {
+    private func accountCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
             VStack(alignment: .leading, spacing: 12) {
-                NeuSectionTitle(title: "账号")
+                SpectrumSectionTitle(title: "账号")
                 HStack(spacing: 8) {
                     Circle()
                         .fill(model.isLoggedIn ? p.success : p.warning)
                         .frame(width: 8, height: 8)
-                        .shadow(color: (model.isLoggedIn ? p.success : p.warning).opacity(0.6), radius: 3)
                     Text(model.isLoggedIn ? "已登录 \(model.account?.uname ?? "")" : "未登录")
                         .font(.system(size: 12.5))
                         .foregroundStyle(p.text)
                     Spacer()
                     Button("重新登录") { model.beginLogin() }
-                        .buttonStyle(.neuCompact())
+                        .buttonStyle(.spectrumCompact())
                     Button("退出登录") { model.logout() }
-                        .buttonStyle(.neuCompact(.danger))
+                        .buttonStyle(.spectrumCompact(.danger))
                 }
             }
         }
     }
 
     // 通知通道
-    private func channelCard(_ p: NeuPalette) -> some View {
-        NeuCard {
+    private func channelCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
             VStack(alignment: .leading, spacing: 10) {
-                NeuSectionTitle(title: "通知通道", subtitle: "Bark · 推送到 iPhone 通知中心")
+                SpectrumSectionTitle(title: "通知通道", subtitle: "Bark · 推送到 iPhone 通知中心")
 
-                NeuField {
-                    TextField("", text: Binding(
+                SpectrumField {
+                    SecureField("Bark 推送 key", text: Binding(
                         get: { model.settings.barkKey ?? "" },
                         set: { model.settings.barkKey = $0; model.commitSettings() }
-                    ), prompt: Text("粘贴 Bark App 里的 key").foregroundColor(p.subtext))
+                    ))
                     .font(.system(size: 12, design: .monospaced))
                 }
 
                 Text("Bark App 首页那条 https://api.day.app/xxx 地址里，最后一段就是 key。")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 12))
                     .foregroundStyle(p.subtext)
             }
         }
     }
 
     // 通知内容
-    private func contentCard(_ p: NeuPalette) -> some View {
-        NeuCard {
+    private func contentCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
             VStack(alignment: .leading, spacing: 10) {
-                NeuSectionTitle(title: "通知内容", subtitle: "变量：{author} {title} {bvid} {url}")
+                SpectrumSectionTitle(title: "通知内容", subtitle: "变量：{author} {title} {bvid} {url}")
 
                 TextField("", text: Binding(
                     get: { model.settings.template },
@@ -670,7 +700,7 @@ struct SettingsView: View {
                 .foregroundStyle(p.text)
                 .lineLimit(3...4)
                 .padding(10)
-                .neuInset(radius: 12)
+                .spectrumInput(radius: 12)
 
                 HStack(spacing: 10) {
                     Button("发送测试消息") {
@@ -680,7 +710,7 @@ struct SettingsView: View {
                             busy = false
                         }
                     }
-                    .buttonStyle(.neuCompact())
+                    .buttonStyle(.spectrumCompact())
                     .disabled(busy)
 
                     Button("用最新投稿演练") {
@@ -690,7 +720,7 @@ struct SettingsView: View {
                             busy = false
                         }
                     }
-                    .buttonStyle(.neuCompact(.prominent))
+                    .buttonStyle(.spectrumCompact(.prominent))
                     .disabled(busy)
 
                     if busy { ProgressView().controlSize(.small) }
@@ -707,10 +737,10 @@ struct SettingsView: View {
     }
 
     // 监控设置
-    private func monitorCard(_ p: NeuPalette) -> some View {
-        NeuCard {
+    private func monitorCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
             VStack(alignment: .leading, spacing: 14) {
-                NeuSectionTitle(title: "监控")
+                SpectrumSectionTitle(title: "监控")
 
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
@@ -718,10 +748,10 @@ struct SettingsView: View {
                             .font(.system(size: 12.5))
                             .foregroundStyle(p.text)
                         Spacer()
-                        NeuTag(text: Settings.intervalLabel(model.settings.intervalClamped),
-                               icon: "timer", tint: p.accent)
+                        SpectrumTag(text: Settings.intervalLabel(model.settings.intervalClamped),
+                               icon: "timer", tint: p.accentText)
                     }
-                    NeuSlider(
+                    SpectrumSlider(
                         value: Binding(
                             get: { model.settings.intervalClamped },
                             set: {
@@ -739,14 +769,14 @@ struct SettingsView: View {
                     }
                 }
 
-                Divider().opacity(0.35)
+                Divider()
 
                 HStack {
                     Text("静默时段")
                         .font(.system(size: 12.5))
                         .foregroundStyle(p.text)
                     Spacer()
-                    Picker("", selection: Binding(
+                    Picker("静默开始时间", selection: Binding(
                         get: { model.settings.quietStartHour ?? -1 },
                         set: { model.settings.quietStartHour = $0 < 0 ? nil : $0; model.commitSettings() }
                     )) {
@@ -754,11 +784,11 @@ struct SettingsView: View {
                         ForEach(0..<24, id: \.self) { h in Text("\(h) 点").tag(h) }
                     }
                     .labelsHidden()
-                    .frame(width: 84)
+                    .frame(width: 92)
 
                     Text("→").foregroundStyle(p.subtext)
 
-                    Picker("", selection: Binding(
+                    Picker("静默结束时间", selection: Binding(
                         get: { model.settings.quietEndHour ?? -1 },
                         set: { model.settings.quietEndHour = $0 < 0 ? nil : $0; model.commitSettings() }
                     )) {
@@ -766,41 +796,41 @@ struct SettingsView: View {
                         ForEach(0..<24, id: \.self) { h in Text("\(h) 点").tag(h) }
                     }
                     .labelsHidden()
-                    .frame(width: 84)
+                    .frame(width: 92)
                 }
 
-                Divider().opacity(0.35)
+                Divider()
 
                 Toggle("登录失效时也发通知提醒",
                        isOn: Binding(
                         get: { model.settings.notifyOnLoginExpiry },
                         set: { model.settings.notifyOnLoginExpiry = $0; model.commitSettings() }
                        ))
-                .toggleStyle(NeuToggleStyle())
+                .toggleStyle(SpectrumToggleStyle())
 
                 Toggle("开机自动启动",
                        isOn: Binding(
                         get: { model.launchAtLogin },
                         set: { model.setLaunchAtLogin($0) }
                        ))
-                .toggleStyle(NeuToggleStyle())
+                .toggleStyle(SpectrumToggleStyle())
             }
         }
     }
 
     // 数据
-    private func dataCard(_ p: NeuPalette) -> some View {
-        NeuCard {
+    private func dataCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
             VStack(alignment: .leading, spacing: 10) {
-                NeuSectionTitle(title: "数据")
+                SpectrumSectionTitle(title: "数据")
                 HStack(spacing: 10) {
                     Button("清除演练记录") {
                         _ = model.clearDrillRecords()
                     }
-                    .buttonStyle(.neuCompact())
+                    .buttonStyle(.spectrumCompact())
 
                     Text("只删除 BV1test 开头的假记录")
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                     Spacer()
                 }

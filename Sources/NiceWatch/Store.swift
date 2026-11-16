@@ -6,11 +6,11 @@ final class Store {
     var data: PersistedData
     private let fileURL: URL
 
-    init() {
+    init(directory: URL? = nil) {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory())
-        let dir = base.appendingPathComponent("NiceWatch", isDirectory: true)
+        let dir = directory ?? base.appendingPathComponent("NiceWatch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("data.json")
 
@@ -34,15 +34,18 @@ final class Store {
 
     var directoryURL: URL { fileURL.deletingLastPathComponent() }
 
-    func save() {
+    @discardableResult
+    func save() -> Bool {
         do {
             let enc = JSONEncoder()
             enc.outputFormatting = [.prettyPrinted, .sortedKeys]
             enc.dateEncodingStrategy = .iso8601
             let raw = try enc.encode(data)
             try raw.write(to: fileURL, options: .atomic)
+            return true
         } catch {
             NSLog("NiceWatch 保存失败: \(error)")
+            return false
         }
     }
 
@@ -96,12 +99,18 @@ final class Store {
             .sorted { $0.pubdate > $1.pubdate }
     }
 
-    /// 只保留最近 500 条非基线记录，避免文件无限增长
+    /// 保留全部待推送记录，以及最近 maxCount 条终态记录。
+    /// 删除记录前推进对应 UP 的历史截止时间，避免旧投稿再次触发推送。
     func pruneSeen(maxCount: Int = 800) {
-        let keys = data.seen.values.filter { $0.state == .baseline }
-        guard keys.count > maxCount else { return }
-        let sorted = keys.sorted { $0.detectedAt < $1.detectedAt }
-        for rec in sorted.prefix(keys.count - maxCount) {
+        let completed = data.seen.values.filter { $0.state != .pending }
+            .sorted {
+                if $0.detectedAt != $1.detectedAt { return $0.detectedAt > $1.detectedAt }
+                return $0.bvid > $1.bvid
+            }
+        for rec in completed.dropFirst(max(0, maxCount)) {
+            if let i = data.ups.firstIndex(where: { $0.mid == rec.mid }) {
+                data.ups[i].baselinePubdate = max(data.ups[i].baselinePubdate, rec.pubdate)
+            }
             data.seen.removeValue(forKey: rec.bvid)
         }
     }

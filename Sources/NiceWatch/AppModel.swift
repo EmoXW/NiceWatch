@@ -11,7 +11,10 @@ final class AppModel: ObservableObject {
     /// 全局单例：AppKit 侧的窗口与 SwiftUI 侧的菜单项共用同一份状态
     static let shared = AppModel()
 
-    let store = Store()
+    let store: Store
+    private let notifierOverride: [Notifier]?
+    private var checkOffset = 0
+    private var processingVideos = false
     private let client = BiliClient.shared
 
     // MARK: 登录
@@ -48,11 +51,15 @@ final class AppModel: ObservableObject {
     /// 设置项的 UI 镜像（改动后调用 commitSettings 落盘）
     @Published var settings: Settings
 
-    init() {
+    init(store: Store = Store(), restore: Bool = true, notifiers: [Notifier]? = nil) {
+        self.store = store
+        self.notifierOverride = notifiers
         AppLog.info("AppModel.init 开始（数据目录：\(AppLog.dirURL.path)）")
         settings = store.data.settings
-        restoreSession()
-        observeWake()
+        if restore {
+            restoreSession()
+            observeWake()
+        }
         AppLog.info("AppModel.init 完成，isLoggedIn=\(isLoggedIn)，已监控 \(store.data.ups.count) 个 UP")
     }
 
@@ -296,6 +303,8 @@ final class AppModel: ObservableObject {
         status = .checking
         defer { isChecking = false }
 
+        await process(videos: [])
+
         do {
             guard let info = try await client.nav() else {
                 isLoggedIn = false
@@ -323,7 +332,8 @@ final class AppModel: ObservableObject {
             var spaceFailed = 0
 
             var skipped = 0
-            for (idx, up) in watched.prefix(20).enumerated() {
+            let batch = Self.nextBatch(watched, offset: &checkOffset)
+            for (idx, up) in batch.enumerated() {
                 // 风控退避：还没到允许时间就跳过，避免持续撞风控
                 if let until = up.backoffUntil, until > Date() {
                     skipped += 1
@@ -349,7 +359,7 @@ final class AppModel: ObservableObject {
                     }
                 }
                 // 错开请求，避免触发风控
-                if idx < min(watched.count, 20) - 1 {
+                if idx < batch.count - 1 {
                     try? await Task.sleep(nanoseconds: 700_000_000)
                 }
             }
@@ -371,7 +381,7 @@ final class AppModel: ObservableObject {
 
             let hit = found.filter { watchedMids.contains($0.mid) }.count
             AppLog.info("检查完成：监控 \(watched.count) 个 UP，抓到 \(found.count) 条，命中 \(hit) 条（兜底=\(usedFallback)）")
-            await process(videos: found)
+            await process(videos: found, retryPending: false)
             lastCheckAt = Date()
             status = .ok
             if usedFallback { toast = "动态通道异常，已改用投稿列表兜底" }
@@ -395,11 +405,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 每轮最多检查 20 个 UP；游标保证整个名单轮流得到检查。
+    nonisolated static func nextBatch(_ watched: [MonitoredUP], offset: inout Int) -> [MonitoredUP] {
+        guard !watched.isEmpty else { offset = 0; return [] }
+        let start = offset % watched.count
+        let count = min(20, watched.count)
+        let batch = (0..<count).map { watched[(start + $0) % watched.count] }
+        offset = (start + count) % watched.count
+        return batch
+    }
+
     /// 处理抓到的视频：判定新视频 → 推送 → 记录状态
     /// - Parameter drill: 演练模式。为 true 时不做「是否属于已监控 UP」和「基线」过滤，
     ///   只保留去重、静默时段、真实推送这几步——这样即使一个 UP 都没在监控，
     ///   也能完整验证推送链路。
-    private func process(videos: [VideoItem], drill: Bool = false) async {
+    func process(videos: [VideoItem], drill: Bool = false, retryPending: Bool = true) async {
+        guard !processingVideos else { return }
+        processingVideos = true
+        defer { processingVideos = false }
+        // 重试不依赖投稿是否仍在接口返回的最近十条中。
+        let pending = store.data.seen.values.filter { retryPending && !drill && $0.state == .pending }
+            .sorted { $0.detectedAt < $1.detectedAt }
+        for rec in pending {
+            if !drill && !store.data.ups.contains(where: { $0.mid == rec.mid && $0.enabled }) { continue }
+            if inQuietHours() { continue }
+            let video = VideoItem(bvid: rec.bvid, title: rec.title, author: rec.author,
+                                  mid: rec.mid, pubdate: rec.pubdate, cover: "")
+            await deliver(video, record: rec)
+        }
         let watched = store.data.ups.filter { $0.enabled }
         let upMap = Dictionary(uniqueKeysWithValues: watched.map { ($0.mid, $0) })
         // 同一 bvid 可能重复出现
@@ -440,12 +473,14 @@ final class AppModel: ObservableObject {
             await deliver(v, record: rec)
         }
         store.pruneSeen()
+        store.save()
     }
 
     /// 按设置组装当前启用的通知通道
     /// 当前只启用 Bark：iMessage 会让 Mac 自动打开「信息」并标记已读，
     /// 已读状态跨设备同步后 iPhone 就不再弹通知，因此整条通道被移除。
     private func activeNotifiers() -> [Notifier] {
+        if let notifiers = notifierOverride { return notifiers }
         let s = store.settings
         guard s.useBark, let k = s.barkKey else { return [] }
         return [BarkNotifier(key: k)]
@@ -453,6 +488,11 @@ final class AppModel: ObservableObject {
 
     private func deliver(_ v: VideoItem, record rec: SeenVideo) async {
         var rec = rec
+        // 持久化失败时停止发送，避免生成无法恢复的推送。
+        guard store.save() else {
+            lastError = "无法保存待推送记录，已停止发送"
+            return
+        }
         let text = store.settings.render(v)
         let notifiers = activeNotifiers()
         guard !notifiers.isEmpty else {

@@ -1,12 +1,14 @@
 # NiceWatch
 
+<img src="Assets/AppIcon-master.png" alt="NiceWatch 应用图标" width="112">
+
 > 一个 macOS 菜单栏小工具：盯着你选的 B站 UP 主，一更新就推到你 iPhone 通知中心。
 
 「喜欢的 UP 主更新了，但 B站 App 的通知总是不来」——这个小工具就是为这件事写的。
 它常驻菜单栏，按你设定的间隔轮询投稿列表，发现新视频立刻通过 [Bark](https://github.com/Finb/Bark)
 推送到手机，比 App 自带推送更及时、更可控。
 
-界面采用**新拟态（Neumorphism / Soft UI）**风格，深浅色模式各有一套配色。
+界面采用参考 [Spectrum 2](https://uilingo.dev/styles/spectrum-2/) 的高对比度设计：浅灰画布、独立卡片、蓝色主操作与深色选中态，支持深浅色模式。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)
@@ -73,6 +75,39 @@ open NiceWatch.app
 
 ## 界面
 
+以下为真实 SwiftUI 界面使用离线演示数据渲染的预览，不包含真实账号或推送 key。
+
+### 监控 · 浅色
+
+![Spectrum 2 浅色监控界面](docs/images/monitor-light.png)
+
+### 监控 · 深色
+
+![Spectrum 2 深色监控界面](docs/images/monitor-dark.png)
+
+<details>
+<summary>查看时间线、设置和添加 UP 主</summary>
+
+#### 时间线
+
+![深色时间线](docs/images/timeline-dark.png)
+
+#### 设置
+
+![浅色设置界面，更多设置可向下滚动](docs/images/settings-light.png)
+
+#### 添加 UP 主
+
+![添加 UP 主](docs/images/add-up-light.png)
+
+</details>
+
+### 菜单栏图标
+
+左侧为普通状态，右侧为未读状态；分别展示浅色和深色背景。
+
+![方形播放标记的菜单栏图标](docs/images/menu-bar.png)
+
 界面分三个页签：
 
 | 页签 | 作用 |
@@ -110,14 +145,18 @@ open NiceWatch.app
 
 ```
 baseline（历史，不推送） ──→ pending（待推送） ──→ notified（已推送）
-                                              ↘ failed（重试 3 次仍失败）
+                                              ↘ failed（共尝试 3 次仍失败）
 ```
 
-**先落盘再发送**，所以中途崩溃或断网不会导致漏发，也不会重复轰炸。
+**先落盘再发送**：保存失败时停止发送；每轮检查先恢复待推送记录，即使视频已不在接口返回列表中也能重试。最多尝试 3 次，成功后不再发送；静默期间暂停重试，暂停或移除的 UP 不重试。
+
+Bark 请求和本地保存不是原子事务：服务端已接收、但客户端超时或保存成功状态前崩溃时，重试仍可能重复通知。
+
+最多保留最近 800 条终态记录（含基线、已推送、失败和静默），待推送记录不裁剪。清理时会推进对应 UP 的历史截止时间，截止时间及以前的投稿不再作为新视频推送。
 
 ### 请求策略与风控退避
 
-- 每个 UP 之间间隔 700ms 串行请求，单轮上限 20 个 UP
+- 每个 UP 之间间隔 700ms 串行请求，单轮上限 20 个 UP，按名单轮换，超过 20 个时分多轮覆盖
 - 命中 `-101`（账号未登录）→ 视为登录失效，暂停监控并提醒重新登录（每天最多一次）
 - 命中 `-352` / `-412` / `-799`（风控）→ 对该 UP 做指数退避：
 
@@ -160,19 +199,29 @@ baseline（历史，不推送） ──→ pending（待推送） ──→ noti
 不开界面的调试与自检入口：
 
 ```bash
-./.build/debug/NiceWatch --selftest      # 7 项接口与配置自检
-./.build/debug/NiceWatch --storetest     # 持久化往返回归测试
-./.build/debug/NiceWatch --backofftest   # 风控退避曲线测试
-./.build/debug/NiceWatch --simulate      # 走一遍完整推送链路（等同设置页的演练按钮）
+swift test                          # 离线监控可靠性回归测试
+swift run NiceWatch --selftest       # 7 项接口与配置自检
+swift run NiceWatch --storetest      # 持久化往返回归测试
+swift run NiceWatch --backofftest    # 风控退避曲线测试
+swift run NiceWatch --simulate       # 走一遍完整推送链路（等同设置页的演练按钮）
 ```
 
-另外 `tools/` 下有两个开发期辅助脚本：
+开发辅助工具：
 
-- `tools/bili_probe.py` — 接口可行性诊断：逐个体检二维码登录、关注列表、动态 feed、投稿列表等端点
+- `tools/bili_probe.py` — B站接口可行性诊断，需要本地登录态 `tools/.bili_session.json`（含真实 cookie，已被忽略，请勿提交）
 - `tools/make_qr.js` — 用 JXA + CoreImage 把文本生成二维码 PNG
+- `tools/build_icons.py` — 从图标母版生成多尺寸图标与 ICNS：`python3 tools/build_icons.py`
+- `tools/render_ui_preview.swift` — 使用临时数据离线渲染深浅色界面，不读取真实账号，不发送推送
 
-> 这两个脚本需要一个本地登录态文件（`tools/.bili_session.json`），该文件含真实 cookie，
-> 已被 `.gitignore` 排除，**请勿提交**。
+在 macOS 上更新预览图：
+
+```bash
+swiftc -parse-as-library $(find Sources/NiceWatch -name '*.swift' ! -name main.swift) \
+  tools/render_ui_preview.swift -o /tmp/nicewatch-preview
+/tmp/nicewatch-preview .shots/spectrum-2
+```
+
+检查生成结果后，将需要展示的图片复制到 `docs/images/`。设置页同时输出普通窗口和长页版本。
 
 ## 目录结构
 
@@ -180,6 +229,7 @@ baseline（历史，不推送） ──→ pending（待推送） ──→ noti
 Sources/NiceWatch/
 ├── main.swift           入口（--selftest / --storetest / --backofftest / --simulate / GUI）
 ├── App.swift            MenuBarExtra + AppKit 主窗口 + 单实例保护
+├── IconArtwork.swift    菜单栏模板图标（普通 / 未读）
 ├── AppModel.swift       核心状态机：登录、监控循环、去重、推送、退避
 ├── BiliAPI.swift        B站接口封装 + WBI 签名
 ├── Models.swift         数据模型与设置项
@@ -188,14 +238,20 @@ Sources/NiceWatch/
 ├── SessionCrypto.swift  AES-GCM 加解密 + 机器绑定密钥派生
 ├── Notifier.swift       Bark 推送通道
 ├── LaunchAtLogin.swift  开机自启（LaunchAgent）
-├── Theme.swift          新拟态设计系统（配色、修饰器、自绘控件）
+├── Theme.swift          Spectrum 2 设计系统（配色、卡片、胶囊按钮、开关与原生滑块）
 ├── Views.swift          SwiftUI 界面
 ├── SelfTest.swift       无界面自检与回归测试
 └── Log.swift            日志（stderr + 文件）
 
 tools/
 ├── bili_probe.py        接口可行性诊断脚本
-└── make_qr.js           JXA 二维码生成
+├── make_qr.js           JXA 二维码生成
+├── build_icons.py       应用图标导出
+└── render_ui_preview.swift  离线界面预览
+
+Assets/                 图标母版、ICNS 与设计说明
+docs/images/            README 使用的界面预览
+Tests/NiceWatchTests/    离线可靠性回归测试
 ```
 
 数据目录：`~/Library/Application Support/NiceWatch/`
