@@ -170,7 +170,7 @@ Bark 请求和本地保存不是原子事务：服务端已接收、但客户端
 
 ### 登录态怎么存
 
-只放在应用自己的数据目录，**不使用系统钥匙串**：
+放在应用自己的数据目录
 
 ```
 ~/Library/Application Support/NiceWatch/session.bin   (权限 0600)
