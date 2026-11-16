@@ -75,8 +75,7 @@ open NiceWatch.app
 
 ## 界面
 
-以下为真实 SwiftUI 界面使用离线演示数据渲染的预览，不包含真实账号或推送 key。
-
+以下为真实 SwiftUI 界面使用离线演示数据渲染的预览。
 ### 监控 · 浅色
 
 ![Spectrum 2 浅色监控界面](docs/images/monitor-light.png)
