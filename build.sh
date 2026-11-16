@@ -5,12 +5,19 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
+ARCH="${2:-native}"
+BUILD_ARGS=(-c "$CONFIG")
+case "$ARCH" in
+    native) ;;
+    universal) BUILD_ARGS+=(--arch arm64 --arch x86_64) ;;
+    *) echo "架构参数应为 native 或 universal"; exit 1 ;;
+esac
 APP="NiceWatch.app"
 BUNDLE_ID="com.emoxw.nicewatch"
 
 echo "==> 1/4 编译（${CONFIG}）"
-swift build -c "$CONFIG"
-BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)/NiceWatch"
+swift build "${BUILD_ARGS[@]}"
+BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)/NiceWatch"
 if [ ! -f "$BIN_PATH" ]; then
   echo "编译产物不存在：$BIN_PATH"; exit 1
 fi

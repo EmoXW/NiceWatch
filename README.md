@@ -31,10 +31,16 @@
 ## 系统要求
 
 - macOS 13 Ventura 或更高
-- 构建需要 Xcode 或 Command Line Tools（提供 Swift 5.9+ 工具链）
+- 从源码构建需要 Xcode 或 Command Line Tools（提供 Swift 5.9+ 工具链）
 - iPhone 上安装 [Bark](https://apps.apple.com/app/bark-customed-notifications/id1403753865)（免费）
 
-## 快速开始
+## 安装
+
+前往 [Releases](https://github.com/EmoXW/NiceWatch/releases/latest) 下载 `NiceWatch-版本号-universal.dmg`，打开后将 `NiceWatch.app` 拖入 `Applications` 文件夹。
+
+安装包同时支持 Apple Silicon 与 Intel，要求 macOS 13 或更高。当前使用 ad-hoc 签名，尚未经过 Apple 公证，首次启动时 macOS 可能提示无法验证开发者，请确认下载来源。
+
+## 从源码构建
 
 ```bash
 git clone https://github.com/EmoXW/NiceWatch.git
@@ -45,6 +51,9 @@ cd NiceWatch
 
 # 启动
 open NiceWatch.app
+
+# 可选：构建通用版 DMG（输出到 dist/）
+./tools/package_dmg.sh
 ```
 
 首次启动会弹出主窗口并显示登录二维码，用**手机 B站 App 扫码**，并在手机上点「确认登录」。
@@ -209,6 +218,7 @@ swift run NiceWatch --simulate       # 走一遍完整推送链路（等同设�
 
 - `tools/bili_probe.py` — B站接口可行性诊断，需要本地登录态 `tools/.bili_session.json`（含真实 cookie，已被忽略，请勿提交）
 - `tools/make_qr.js` — 用 JXA + CoreImage 把文本生成二维码 PNG
+- `tools/package_dmg.sh` — 构建通用版 DMG，并生成 SHA-256 校验文件
 - `tools/build_icons.py` — 从图标母版生成多尺寸图标与 ICNS：`python3 tools/build_icons.py`
 - `tools/render_ui_preview.swift` — 使用临时数据离线渲染深浅色界面，不读取真实账号，不发送推送
 
@@ -246,6 +256,7 @@ tools/
 ├── bili_probe.py        接口可行性诊断脚本
 ├── make_qr.js           JXA 二维码生成
 ├── build_icons.py       应用图标导出
+├── package_dmg.sh       通用版 DMG 打包
 └── render_ui_preview.swift  离线界面预览
 
 Assets/                 图标母版、ICNS 与设计说明
@@ -286,7 +297,7 @@ Tests/NiceWatchTests/    离线可靠性回归测试
 
 - **Mac 必须开机联网**。睡眠期间不监控；唤醒后会立即补检一次，但补不回实时性。
 - **B站接口非官方**，随时可能变更或加强风控。签名与端点集中在 `BiliAPI.swift`，方便快速跟进。
-- **ad-hoc 签名**，适合自用。要分发给别人需要 Apple 开发者账号做正式签名与公证。
+- **ad-hoc 签名且未公证**，安装时可能出现开发者验证提示；当前 Release 不具备 Developer ID 签名与 Apple 公证。
 - 只在 macOS 13+ 上验证过；更早版本未测试。
 
 ## 贡献

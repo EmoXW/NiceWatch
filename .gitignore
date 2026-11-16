@@ -34,3 +34,6 @@ login_qr.png
 
 # 可从母版重新生成的图标尺寸导出
 Assets/AppIcon.iconset/
+
+# Release 安装包与校验文件
+dist/
