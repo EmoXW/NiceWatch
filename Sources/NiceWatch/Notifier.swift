@@ -9,6 +9,11 @@ import AppKit
 protocol Notifier {
     var name: String { get }
     func send(text: String) async throws
+    func send(text: String, targetURL: URL?) async throws
+}
+
+extension Notifier {
+    func send(text: String, targetURL: URL?) async throws { try await send(text: text) }
 }
 
 enum NotifierError: LocalizedError {
@@ -63,14 +68,22 @@ final class BarkNotifier: Notifier {
         return ("https://api.day.app", t)
     }
 
-    func send(text: String) async throws {
+    static func notificationLink(in lines: [String]) -> String? {
+        lines.first { line in
+            guard let url = URL(string: line), url.scheme == "https", let host = url.host else { return false }
+            return ["www.bilibili.com", "bilibili.com", "t.bilibili.com", "live.bilibili.com"].contains(host)
+        }
+    }
+
+    func request(text: String, targetURL: URL? = nil) throws -> URLRequest {
         guard let parsed = Self.parse(key) else { throw NotifierError.notConfigured }
 
         let allLines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let title = allLines.first ?? "NiceWatch"
-        let link = allLines.first { $0.hasPrefix("https://www.bilibili.com/video/") } ?? ""
+        let explicitLink = targetURL.flatMap { Self.notificationLink(in: [$0.absoluteString]) }
+        let link = explicitLink ?? Self.notificationLink(in: allLines) ?? ""
 
         // 链接只通过 url 参数提供（点击通知即打开），
         // 正文里要把这条裸链接剔除，否则通知里会显示两行一模一样的链接。
@@ -102,6 +115,13 @@ final class BarkNotifier: Notifier {
 
         var req = URLRequest(url: final)
         req.timeoutInterval = 20
+        return req
+    }
+
+    func send(text: String) async throws { try await send(text: text, targetURL: nil) }
+
+    func send(text: String, targetURL: URL?) async throws {
+        let req = try request(text: text, targetURL: targetURL)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let bodyText = String(data: data.prefix(200), encoding: .utf8) ?? ""

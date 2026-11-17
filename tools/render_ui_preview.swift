@@ -15,6 +15,13 @@ struct UIPreview {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = Store(directory: directory)
         let model = AppModel(store: store, restore: false, notifiers: [])
+        // 仅为设置页展示所有类别与开播模板；不会触发监控或真实推送。
+        var preferences = PushContentPreferences()
+        preferences.textDynamics = true
+        preferences.reposts = true
+        preferences.live = true
+        model.settings.contentPreferences = preferences
+        store.data.settings = model.settings
         model.account = AccountInfo(mid: 1, uname: "NiceWatch 演示账号", face: "", level: 5)
         model.isLoggedIn = true
         model.status = .ok
@@ -36,6 +43,18 @@ struct UIPreview {
                               author: names[i], mid: Int64(i + 1), pubdate: Int(Date().timeIntervalSince1970) - i * 3600, cover: "")
             _ = store.markSeen(v, state: state)
         }
+        let otherItems = [
+            VideoItem(bvid: "dynamic:preview-text", title: "一张照片，记录今天的日常", author: names[0], mid: 1,
+                pubdate: Int(Date().timeIntervalSince1970), cover: "", kind: .textDynamic,
+                link: "https://t.bilibili.com/123456", content: "分享一张今天拍到的照片。"),
+            VideoItem(bvid: "dynamic:preview-repost", title: "转发推荐：这个分享值得一看", author: names[1], mid: 2,
+                pubdate: Int(Date().timeIntervalSince1970) - 60, cover: "", kind: .repost,
+                link: "https://t.bilibili.com/234567", content: "转发推荐"),
+            VideoItem(bvid: "live:preview", title: "聊聊这周的新鲜事", author: names[0], mid: 1,
+                pubdate: Int(Date().timeIntervalSince1970) - 120, cover: "", kind: .live,
+                link: "https://live.bilibili.com/123456", roomID: 123456)
+        ]
+        for item in otherItems { _ = store.markSeen(item, state: .notified) }
         for scheme in [ColorScheme.light, .dark] {
             for page in ["monitor", "timeline", "settings", "settings-window", "login", "add", "confirm-remove", "confirm-clear"] {
                 let content: AnyView
@@ -52,7 +71,7 @@ struct UIPreview {
                 }
                 model.confirmation = page == "confirm-remove" ? .removeUP(store.data.ups[0]) : page == "confirm-clear" ? .clearAllRecords : nil
                 let size = NSSize(width: page == "add" ? 580 : 820,
-                                  height: page == "settings" ? 1250 : page == "add" ? 500 : 640)
+                                  height: page == "settings" ? 2250 : page == "add" ? 500 : 640)
                 let root = ZStack { SpectrumBackground(); content.padding(page.hasPrefix("confirm-") ? 0 : 24) }
                     .environmentObject(model).environment(\.colorScheme, scheme)
                     .frame(width: size.width, height: size.height)

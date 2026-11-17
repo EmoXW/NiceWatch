@@ -24,7 +24,7 @@ final class MonitorTests: XCTestCase {
     @MainActor
     func testPendingSurvivesRestartAndRetriesWithoutFeed() async throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         let notifier = ProbeNotifier()
         notifier.onSend = {
             XCTAssertEqual(Store(directory: store.directoryURL).data.seen["BVtest"]?.state, .pending)
@@ -47,7 +47,7 @@ final class MonitorTests: XCTestCase {
     @MainActor
     func testFailuresStopAfterThreeAttempts() async throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         let notifier = ProbeNotifier()
         let model = AppModel(store: store, restore: false, notifiers: [notifier])
         let video = VideoItem(bvid: "BVtest", title: "test", author: "UP", mid: 1, pubdate: 2, cover: "")
@@ -60,7 +60,7 @@ final class MonitorTests: XCTestCase {
     @MainActor
     func testSaveFailurePreventsSend() async throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         try FileManager.default.removeItem(at: store.directoryURL)
         let notifier = ProbeNotifier()
         let model = AppModel(store: store, restore: false, notifiers: [notifier])
@@ -85,7 +85,7 @@ final class MonitorTests: XCTestCase {
     @MainActor
     func testPruningPreservesPendingAndDeduplication() async throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         for index in 2...12 {
             let video = VideoItem(bvid: "BV\(index)", title: "test", author: "UP", mid: 1, pubdate: index, cover: "")
             _ = store.markSeen(video, state: index == 2 ? .pending : .notified)
@@ -170,7 +170,7 @@ extension MonitorTests {
     func testPauseOrRemoveDuringSendStopsRemainingVideos() async throws {
         for remove in [false, true] {
             let store = try temporaryStore()
-            store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+            store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
             let notifier = ControlledNotifier()
             let model = AppModel(store: store, restore: false, notifiers: [notifier])
             let videos = (2...3).map { VideoItem(bvid: "BV\($0)", title: "test", author: "UP", mid: 1, pubdate: $0, cover: "") }
@@ -188,7 +188,7 @@ extension MonitorTests {
     @MainActor
     func testClearRecordsKeepsAccountSettingsMonitorsAndSession() throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         store.data.settings.barkKey = "test-only-key"
         store.data.settings.intervalSeconds = 600
         store.data.account = AccountInfo(mid: 8, uname: "test", face: "", level: 1)
@@ -221,7 +221,7 @@ extension MonitorTests {
     @MainActor
     func testClearedRecordsAreNotRestoredByInFlightSend() async throws {
         let store = try temporaryStore()
-        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", baselinePubdate: 1)]
+        store.data.ups = [MonitoredUP(mid: 1, name: "UP", face: "", addedAt: Date(timeIntervalSince1970: 1), baselinePubdate: 1)]
         let notifier = ControlledNotifier()
         let model = AppModel(store: store, restore: false, notifiers: [notifier])
         let video = VideoItem(bvid: "BVtest", title: "test", author: "UP", mid: 1, pubdate: 2, cover: "")

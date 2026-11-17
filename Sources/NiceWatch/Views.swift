@@ -551,7 +551,7 @@ struct TimelineView: View {
                     Text("还没有检测到更新")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(p.text)
-                    Text("每 \(Settings.intervalLabel(model.settings.intervalClamped))检查一次，发现新视频会立刻推送。")
+                    Text("每 \(Settings.intervalLabel(model.settings.intervalClamped))检查一次，按所选内容推送更新。")
                         .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
                 }
@@ -577,6 +577,9 @@ struct TimelineView: View {
                     .foregroundStyle(p.text)
                     .lineLimit(1)
                 HStack(spacing: 5) {
+                    Text(item.contentKind.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(p.subtext)
                     Text(item.author)
                         .font(.system(size: 12))
                         .foregroundStyle(p.subtext)
@@ -597,7 +600,7 @@ struct TimelineView: View {
                     .font(.system(size: 11, weight: .semibold))
             }
             .buttonStyle(.spectrumCompact())
-            .accessibilityLabel("打开视频：\(item.title)")
+            .accessibilityLabel("打开\(item.contentKind.title)：\(item.title)")
         }
         .padding(16)
         .spectrumSurface(radius: 14)
@@ -634,6 +637,7 @@ struct SettingsView: View {
             VStack(spacing: 14) {
                 accountCard(p)
                 channelCard(p)
+                pushContentCard(p)
                 contentCard(p)
                 monitorCard(p)
                 dataCard(p)
@@ -696,11 +700,65 @@ struct SettingsView: View {
         }
     }
 
+    // 推送类别与开播模板
+    private func pushContentCard(_ p: SpectrumPalette) -> some View {
+        SpectrumCard {
+            VStack(alignment: .leading, spacing: 16) {
+                SpectrumSectionTitle(title: "推送内容", subtitle: "只推送已监控 UP 的所选内容；新启用的类别从启用时开始检测")
+                ForEach(ContentKind.allCases) { kind in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Toggle(kind.title, isOn: Binding(
+                            get: { model.settings.contentPreferences.isEnabled(kind) },
+                            set: { model.setContentEnabled(kind, enabled: $0) }
+                        ))
+                        .toggleStyle(SpectrumToggleStyle())
+                        Text(kind.detail).font(.system(size: 12)).foregroundStyle(p.subtext)
+                    }
+                    if kind != .live { Divider() }
+                }
+                if !model.settings.contentPreferences.hasAny {
+                    Text("未选择任何内容，暂不发送更新通知。")
+                        .font(.system(size: 12)).foregroundStyle(p.warning)
+                }
+                if model.settings.contentPreferences.live {
+                    Divider()
+                    SpectrumSectionTitle(title: "开播提醒模板",
+                        subtitle: "变量：{author} 主播 · {title} 直播标题 · {url} 链接 · {room_id} 房间号")
+                    TextField("开播提醒模板", text: Binding(
+                        get: { model.settings.liveTemplateValue },
+                        set: { model.settings.liveTemplate = $0; model.commitSettings() }
+                    ), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(p.text)
+                    .lineLimit(3...5)
+                    .padding(12)
+                    .spectrumInput()
+                    let sample = VideoItem(bvid: "preview-live", title: "一起聊聊今天的新鲜事", author: "示例UP",
+                        mid: 0, pubdate: 0, cover: "", kind: .live,
+                        link: "https://live.bilibili.com/123456", roomID: 123456)
+                    Text(model.settings.render(sample))
+                        .font(.system(size: 12)).foregroundStyle(p.text)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(p.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel("开播提醒预览：" + model.settings.render(sample))
+                    Text("开启时已经进行中的直播只建立基线；新开播提醒一次，持续直播和重启均不重复提醒。")
+                        .font(.system(size: 12)).foregroundStyle(p.subtext)
+                    Button("恢复默认开播模板") {
+                        model.settings.liveTemplate = nil
+                        model.commitSettings()
+                    }
+                    .buttonStyle(.spectrumCompact())
+                }
+            }
+        }
+    }
+
     // 通知内容
     private func contentCard(_ p: SpectrumPalette) -> some View {
         SpectrumCard {
             VStack(alignment: .leading, spacing: 10) {
-                SpectrumSectionTitle(title: "通知内容", subtitle: "变量：{author} {title} {bvid} {url}")
+                SpectrumSectionTitle(title: "普通内容模板", subtitle: "变量：{author} {title} {content} {type} {bvid} {url}")
 
                 TextField("", text: Binding(
                     get: { model.settings.template },
@@ -732,7 +790,7 @@ struct SettingsView: View {
                         }
                     }
                     .buttonStyle(.spectrumCompact(.prominent))
-                    .disabled(busy)
+                    .disabled(busy || !model.settings.contentPreferences.hasVideo)
 
                     if busy { ProgressView().controlSize(.small) }
                     Spacer()

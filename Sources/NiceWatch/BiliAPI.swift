@@ -137,8 +137,15 @@ struct DynFeedData: Decodable { let items: [DynItem]? }
 
 struct DynItem: Decodable {
     let type: String?
+    let idStr: String?
     let modules: DynModules?
+    let orig: DynOriginal?
+    enum CodingKeys: String, CodingKey { case type, modules, orig; case idStr = "id_str" }
 }
+struct DynOriginal: Decodable { let modules: DynModules? }
+struct DynDescription: Decodable { let text: String? }
+struct DynOpus: Decodable { let summary: DynDescription?; let title: String? }
+struct DynArticle: Decodable { let title: String?; let desc: String? }
 
 struct DynModules: Decodable {
     let moduleAuthor: DynAuthor?
@@ -162,8 +169,8 @@ struct DynAuthor: Decodable {
     }
 }
 
-struct DynDynamic: Decodable { let major: DynMajor? }
-struct DynMajor: Decodable { let archive: DynArchive? }
+struct DynDynamic: Decodable { let major: DynMajor?; let desc: DynDescription? }
+struct DynMajor: Decodable { let archive: DynArchive?; let opus: DynOpus?; let article: DynArticle? }
 
 struct DynArchive: Decodable {
     let bvid: String?
@@ -546,7 +553,7 @@ final class BiliClient {
         }
     }
 
-    // MARK: - 投稿列表（单 UP 兜底通道）
+    // MARK: - 逐 UP 投稿列表与空间动态
 
     func spaceVideos(mid: Int64, page: Int = 1, pageSize: Int = 10) async throws -> [VideoItem] {
         let mixin = try await mixinKey()
@@ -565,7 +572,9 @@ final class BiliClient {
                                         referer: "https://space.bilibili.com/\(mid)/video")
         let env = try decode(Envelope<ArcSearchData>.self, from: data)
         if env.code != 0 { throw BiliError.api(code: env.code, message: env.message ?? "投稿列表失败") }
-        guard let vlist = env.data?.list?.vlist else { return [] }
+        guard let vlist = env.data?.list?.vlist else {
+            throw BiliError.decoding("投稿接口缺少 list.vlist，不能视为没有更新")
+        }
         return vlist.compactMap { v in
             guard let created = v.created else { return nil }
             return VideoItem(bvid: v.bvid,
@@ -577,11 +586,44 @@ final class BiliClient {
         }
     }
 
-    // MARK: - 关注动态 feed（主通道）
+    /// 动态视频不一定出现在投稿列表中；独立查询每位 UP，不依赖混合关注流的窗口。
+    func spaceDynamicVideos(mid: Int64) async throws -> [VideoItem] {
+        try await spaceDynamicItems(mid: mid).filter { $0.contentKind.isVideo }
+    }
+
+    func spaceDynamicItems(mid: Int64) async throws -> [VideoItem] {
+        var comps = URLComponents(string: "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space")!
+        comps.queryItems = [
+            URLQueryItem(name: "host_mid", value: String(mid)),
+            URLQueryItem(name: "timezone_offset", value: "-480"),
+        ]
+        let bytes = try await rawRequest(comps.url!, referer: "https://space.bilibili.com/\(mid)/dynamic")
+        let envelope = try decode(Envelope<DynFeedData>.self, from: bytes)
+        guard envelope.code == 0 else {
+            throw BiliError.api(code: envelope.code, message: envelope.message ?? "空间动态失败")
+        }
+        guard envelope.data?.items != nil else {
+            throw BiliError.decoding("空间动态缺少 items，不能视为没有更新")
+        }
+        return Self.parseDynamicItems(envelope.data).filter { $0.mid == mid }
+    }
+
+    /// 公开直播状态接口，live_status=1 为直播中，2 为轮播，不作为开播。
+    func liveRoom(mid: Int64) async throws -> LiveRoom? {
+        var comps = URLComponents(string: "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids")!
+        comps.queryItems = [URLQueryItem(name: "uids[]", value: String(mid))]
+        let bytes = try await rawRequest(comps.url!, referer: "https://live.bilibili.com/", apiHost: false)
+        let env = try decode(Envelope<LiveStatusData>.self, from: bytes)
+        guard env.code == 0 else { throw BiliError.api(code: env.code, message: env.message ?? "直播状态失败") }
+        guard let rooms = env.data else { throw BiliError.decoding("直播状态缺少 data") }
+        return rooms.rooms[String(mid)]
+    }
+
+    // MARK: - 混合关注动态（所有逐 UP 来源都失败时的最后兜底）
 
     /// 一次请求返回所有关注 UP 的最新动态；只保留视频投稿
     func dynamicVideoFeed() async throws -> [VideoItem] {
-        var params: [(String, String)] = [
+        let params: [(String, String)] = [
             ("type", "video"),
             ("page", "1"),
             ("timezone_offset", "-480"),
@@ -612,25 +654,44 @@ final class BiliClient {
         }
     }
 
-    private static func parseFeed(_ data: DynFeedData?) -> [VideoItem] {
-        guard let items = data?.items else { return [] }
-        var out: [VideoItem] = []
-        for it in items {
-            guard it.type == "DYNAMIC_TYPE_AV",
-                  let author = it.modules?.moduleAuthor,
-                  let mid = author.mid,
-                  let archive = it.modules?.moduleDynamic?.major?.archive,
-                  let bvid = archive.bvid, !bvid.isEmpty
-            else { continue }
-            out.append(VideoItem(bvid: bvid,
-                                 title: archive.title ?? "",
-                                 author: author.name ?? "",
-                                 mid: mid,
-                                 pubdate: author.pubTs?.value ?? Int(Date().timeIntervalSince1970),
-                                 cover: archive.cover ?? ""))
-        }
-        return out
+    static func parseFeed(_ data: DynFeedData?) -> [VideoItem] {
+        parseDynamicItems(data).filter { $0.contentKind.isVideo }
     }
+
+    static func parseDynamicItems(_ data: DynFeedData?) -> [VideoItem] {
+        guard let items = data?.items else { return [] }
+        return items.compactMap { item in
+            guard let author = item.modules?.moduleAuthor, let mid = author.mid,
+                  let published = author.pubTs?.value, published > 0 else { return nil }
+            let dynamic = item.modules?.moduleDynamic
+            if item.type == "DYNAMIC_TYPE_AV" {
+                guard let archive = dynamic?.major?.archive,
+                      let bvid = archive.bvid, !bvid.isEmpty else { return nil }
+                return VideoItem(bvid: bvid, title: archive.title ?? "视频更新", author: author.name ?? "",
+                                 mid: mid, pubdate: published, cover: archive.cover ?? "", kind: .dynamicVideo)
+            }
+            let kind: ContentKind
+            switch item.type {
+            case "DYNAMIC_TYPE_WORD", "DYNAMIC_TYPE_DRAW", "DYNAMIC_TYPE_ARTICLE", "DYNAMIC_TYPE_OPUS": kind = .textDynamic
+            case "DYNAMIC_TYPE_FORWARD": kind = .repost
+            default: return nil
+            }
+            guard let id = item.idStr, !id.isEmpty else { return nil }
+            var text = dynamic?.desc?.text ?? dynamic?.major?.opus?.summary?.text ?? dynamic?.major?.article?.desc ?? ""
+            if kind == .repost {
+                let original = item.orig?.modules?.moduleDynamic
+                let summary = original?.desc?.text ?? original?.major?.opus?.summary?.text ?? original?.major?.archive?.title ?? ""
+                if !summary.isEmpty { text += "\n转发内容：" + summary }
+            }
+            text = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400))
+            let title = dynamic?.major?.opus?.title ?? dynamic?.major?.article?.title ??
+                (text.isEmpty ? kind.title : String(text.prefix(80)))
+            return VideoItem(bvid: "dynamic:\(id)", title: title, author: author.name ?? "",
+                             mid: mid, pubdate: published, cover: "", kind: kind,
+                             link: "https://t.bilibili.com/\(id)", content: text)
+        }
+    }
+
 }
 
 // MARK: - 极简 JSON 值（用于只读个别字段）

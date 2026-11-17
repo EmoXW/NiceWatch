@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
     private var checkOffset = 0
     private var processingVideos = false
     private let client = BiliClient.shared
+    private let monitoringAPI: MonitoringAPI
 
     // MARK: 登录
 
@@ -54,9 +55,11 @@ final class AppModel: ObservableObject {
     /// 设置项的 UI 镜像（改动后调用 commitSettings 落盘）
     @Published var settings: Settings
 
-    init(store: Store = Store(), restore: Bool = true, notifiers: [Notifier]? = nil) {
+    init(store: Store = Store(), restore: Bool = true, notifiers: [Notifier]? = nil,
+         monitoringAPI: MonitoringAPI? = nil) {
         self.store = store
         self.notifierOverride = notifiers
+        self.monitoringAPI = monitoringAPI ?? BiliClient.shared
         AppLog.info("AppModel.init 开始（数据目录：\(AppLog.dirURL.path)）")
         settings = store.data.settings
         storeObservation = store.objectWillChange.sink { [weak self] _ in
@@ -104,6 +107,7 @@ final class AppModel: ObservableObject {
             store.data.ups[index].baselinePubdate = max(store.data.ups[index].baselinePubdate, cutoff)
             store.data.ups[index].lastNotifiedAt = nil
             store.data.ups[index].lastSeenAt = nil
+            store.data.ups[index].liveObservation?.pendingEvent = nil
         }
         guard store.save() else {
             store.data = previous
@@ -120,6 +124,18 @@ final class AppModel: ObservableObject {
         store.data.settings = settings
         store.save()
         startMonitoring()
+    }
+
+    func setContentEnabled(_ kind: ContentKind, enabled: Bool) {
+        var preferences = settings.contentPreferences
+        guard preferences.isEnabled(kind) != enabled else { return }
+        preferences.set(kind, enabled: enabled, now: Int(Date().timeIntervalSince1970))
+        settings.contentPreferences = preferences
+        if kind == .live {
+            // 重新启用时建立新基线，不把当前正在进行的直播当作刚开播。
+            for index in store.data.ups.indices { store.data.ups[index].liveObservation = nil }
+        }
+        commitSettings()
     }
 
     // MARK: - 启动恢复
@@ -330,11 +346,11 @@ final class AppModel: ObservableObject {
         isChecking = true
         status = .checking
         defer { isChecking = false }
-
         await process(videos: [])
+        guard store.settings.contentPreferences.hasAny else { status = .idle; return }
 
         do {
-            guard let info = try await client.nav() else {
+            guard let info = try await monitoringAPI.nav() else {
                 isLoggedIn = false
                 status = .loginExpired
                 await notifyLoginExpiry()
@@ -342,97 +358,130 @@ final class AppModel: ObservableObject {
             }
             account = info
             store.account = info
-
             let watched = store.data.ups.filter { $0.enabled }
             guard !watched.isEmpty else {
                 status = .ok
                 lastCheckAt = Date()
                 return
             }
-            let watchedMids = Set(watched.map(\.mid))
-
-            // 主通道：逐 UP 查投稿列表。
-            // 不能用关注动态 feed 作主通道——它只返回所有关注者的最近 20 条，
-            // 关注多或睡眠几小时后，被监控的 UP 很容易被挤出窗口 → 漏检。
-            // 监控名单通常只有个位数，逐 UP 查询才是权威且可靠的。
             var found: [VideoItem] = []
-            var usedFallback = false
-            var spaceFailed = 0
-
+            var sourceErrors: [String] = []
+            var riskControlled = false
+            var successfulSources = 0
+            var successfulMediaSources = 0
             var skipped = 0
             let batch = Self.nextBatch(watched, offset: &checkOffset)
-            for (idx, up) in batch.enumerated() {
-                guard store.data.ups.contains(where: { $0.mid == up.mid && $0.enabled }) else { continue }
-                // 风控退避：还没到允许时间就跳过，避免持续撞风控
-                if let until = up.backoffUntil, until > Date() {
-                    skipped += 1
-                    continue
+            for (index, up) in batch.enumerated() {
+                guard isMonitoredAndEnabled(up.mid) else { continue }
+                if let until = up.backoffUntil, until > Date() { skipped += 1; continue }
+                var uploads: [VideoItem] = []
+                var dynamics: [VideoItem] = []
+                var upRisk = false
+                var upSucceeded = false
+                var uploadsSucceeded = false
+                var liveEvents: [VideoItem] = []
+                var requestedPreviously = false
+                // 视频源用于区分普通投稿和动态专属视频，其余类别按开关查询。
+                for source in 0..<3 {
+                    guard isMonitoredAndEnabled(up.mid) else { break }
+                    let preferences = store.settings.contentPreferences
+                    let requested = source == 0 ? preferences.hasVideo : source == 1 ? preferences.hasDynamicContent : preferences.live
+                    guard requested else { continue }
+                    if requestedPreviously { try? await Task.sleep(nanoseconds: 700_000_000) }
+                    requestedPreviously = true
+                    do {
+                        if source == 0 {
+                            uploads = try await monitoringAPI.spaceVideos(mid: up.mid, page: 1, pageSize: 10)
+                            uploadsSucceeded = true
+                        } else if source == 1 {
+                            dynamics = try await monitoringAPI.spaceDynamicItems(mid: up.mid)
+                        } else {
+                            let room = try await monitoringAPI.liveRoom(mid: up.mid)
+                            if store.settings.contentPreferences.live,
+                               let i = store.data.ups.firstIndex(where: { $0.mid == up.mid && $0.enabled }) {
+                                if room == nil, (store.data.ups[i].liveObservation?.roomID ?? 0) > 0 {
+                                    throw BiliError.decoding("直播接口未返回已知直播间，保留上次状态")
+                                }
+                                let observation = LiveObservation.advance(previous: store.data.ups[i].liveObservation,
+                                    room: room, mid: up.mid, author: up.name, now: Int(Date().timeIntervalSince1970),
+                                    startedAfter: max(up.notificationFloor, store.settings.contentPreferences.enabledSince[ContentKind.live.rawValue] ?? 0))
+                                var state = observation.state
+                                if let event = observation.event {
+                                    if store.hasSeen(event.bvid) { state.pendingEvent = nil }
+                                    else { liveEvents.append(event) }
+                                }
+                                store.data.ups[i].liveObservation = state
+                            }
+                        }
+                        successfulSources += 1
+                        if source < 2 { successfulMediaSources += 1 }
+                        upSucceeded = true
+                    } catch let error as BiliError where error.isLoginExpired {
+                        isLoggedIn = false
+                        status = .loginExpired
+                        await notifyLoginExpiry()
+                        return
+                    } catch {
+                        let label = source == 0 ? "投稿列表" : source == 1 ? "空间动态" : "直播状态"
+                        sourceErrors.append("\(up.name)\(label)：\(error.localizedDescription)")
+                        if (error as? BiliError)?.isRiskControl == true { upRisk = true }
+                        AppLog.info("  \(up.name)：\(label)失败（\(error.localizedDescription)）")
+                    }
                 }
+                guard isMonitoredAndEnabled(up.mid) else { continue }
+                // 只选动态视频时，投稿来源失败就无法可靠分类；不误推已关闭的普通投稿。
+                if !uploadsSucceeded && !store.settings.contentPreferences.uploads {
+                    dynamics.removeAll { $0.contentKind.isVideo }
+                }
+                let merged = (VideoSources.merge(uploads: uploads, dynamics: dynamics) + liveEvents).sorted { $0.pubdate < $1.pubdate }
+                found.append(contentsOf: merged)
+                let latest = merged.last.map { "\($0.bvid) · \($0.pubDate.formatted(date: .numeric, time: .shortened))" } ?? "无"
+                AppLog.info("  \(up.name)：投稿 \(uploads.count) 条，动态内容 \(dynamics.count) 条，合并 \(merged.count) 条；最新 \(latest)")
+                if upRisk {
+                    riskControlled = true
+                    escalateBackoff(mid: up.mid, name: up.name)
+                } else if upSucceeded { resetBackoff(mid: up.mid) }
+                if index < batch.count - 1 { try? await Task.sleep(nanoseconds: 700_000_000) }
+            }
+            if successfulMediaSources == 0 && store.settings.contentPreferences.hasVideo && !sourceErrors.isEmpty {
                 do {
-                    let vids = try await client.spaceVideos(mid: up.mid, pageSize: 10)
-                    guard store.data.ups.contains(where: { $0.mid == up.mid && $0.enabled }) else { continue }
-                    found.append(contentsOf: vids)
-                    AppLog.info("  \(up.name)：拉到 \(vids.count) 条投稿")
-                    resetBackoff(mid: up.mid)
-                } catch let e as BiliError where e.isLoginExpired {
+                    let watchedMids = Set(watched.map(\.mid))
+                    let feed = try await monitoringAPI.dynamicVideoFeed()
+                    found.append(contentsOf: feed.filter { watchedMids.contains($0.mid) })
+                    AppLog.info("所有逐 UP 来源失败，补查混合关注动态 \(found.count) 条")
+                } catch let error as BiliError where error.isLoginExpired {
                     isLoggedIn = false
                     status = .loginExpired
                     await notifyLoginExpiry()
                     return
-                } catch {
-                    spaceFailed += 1
-                    let be = error as? BiliError
-                    if be?.isRiskControl == true {
-                        escalateBackoff(mid: up.mid, name: up.name)
-                    } else {
-                        AppLog.info("  \(up.name)：投稿列表失败（\(be?.errorDescription ?? error.localizedDescription)）")
-                    }
-                }
-                // 错开请求，避免触发风控
-                if idx < batch.count - 1 {
-                    try? await Task.sleep(nanoseconds: 700_000_000)
-                }
+                } catch { sourceErrors.append("关注动态：\(error.localizedDescription)") }
             }
-            if skipped > 0 {
-                AppLog.info("  \(skipped) 个 UP 处于风控退避期，本轮跳过")
-            }
-
-            // 兜底：投稿列表大面积失败时，用关注动态 feed 补一次
-            if spaceFailed > 0 && found.isEmpty {
-                usedFallback = true
-                do {
-                    let feed = try await client.dynamicVideoFeed()
-                    found = feed.filter { watchedMids.contains($0.mid) }
-                    AppLog.info("已启用动态 feed 兜底，命中 \(found.count) 条")
-                } catch {
-                    lastError = (error as? BiliError)?.errorDescription ?? error.localizedDescription
-                }
-            }
-
-            let hit = found.filter { watchedMids.contains($0.mid) }.count
-            AppLog.info("检查完成：监控 \(watched.count) 个 UP，抓到 \(found.count) 条，命中 \(hit) 条（兜底=\(usedFallback)）")
             await process(videos: found, retryPending: false)
             lastCheckAt = Date()
-            status = .ok
-            if usedFallback { toast = "动态通道异常，已改用投稿列表兜底" }
+            if riskControlled || skipped > 0 {
+                status = .riskControlled("部分来源触发风控，已退避")
+            } else if !sourceErrors.isEmpty {
+                status = .networkError("部分来源不可用")
+            } else { status = .ok }
+            if !sourceErrors.isEmpty { lastError = sourceErrors.joined(separator: "；") }
+            AppLog.info("检查完成：监控 \(watched.count) 个 UP，合并 \(found.count) 条内容，成功来源 \(successfulSources)，失败来源 \(sourceErrors.count)，退避跳过 \(skipped)")
             store.save()
-        } catch let e as BiliError {
-            AppLog.info("检查失败：\(e.errorDescription ?? "")")
-            if e.isLoginExpired {
+        } catch let error as BiliError {
+            lastError = error.localizedDescription
+            if error.isLoginExpired {
                 isLoggedIn = false
                 status = .loginExpired
                 await notifyLoginExpiry()
-            } else if e.isRiskControl {
-                status = .riskControlled(e.errorDescription ?? "")
-                lastError = e.errorDescription
-            } else {
-                status = .networkError(e.errorDescription ?? "")
-                lastError = e.errorDescription
-            }
+            } else if error.isRiskControl { status = .riskControlled(error.localizedDescription) }
+            else { status = .networkError(error.localizedDescription) }
         } catch {
             status = .networkError(error.localizedDescription)
             lastError = error.localizedDescription
         }
+    }
+
+    private func isMonitoredAndEnabled(_ mid: Int64) -> Bool {
+        store.data.ups.contains { $0.mid == mid && $0.enabled }
     }
 
     /// 每轮最多检查 20 个 UP；游标保证整个名单轮流得到检查。
@@ -460,9 +509,16 @@ final class AppModel: ObservableObject {
         for rec in pending {
             guard generation == recordGeneration else { return }
             if !drill && !store.data.ups.contains(where: { $0.mid == rec.mid && $0.enabled }) { continue }
+            if !drill && !store.settings.contentPreferences.allows(rec.contentKind, publishedAt: rec.pubdate) {
+                var skipped = rec
+                skipped.state = .muted
+                store.updateSeen(skipped)
+                continue
+            }
             if inQuietHours() { continue }
             let video = VideoItem(bvid: rec.bvid, title: rec.title, author: rec.author,
-                                  mid: rec.mid, pubdate: rec.pubdate, cover: "")
+                                  mid: rec.mid, pubdate: rec.pubdate, cover: "", kind: rec.kind, link: rec.link,
+                                  content: rec.content, roomID: rec.roomID)
             await deliver(video, record: rec)
             guard generation == recordGeneration else { return }
         }
@@ -482,12 +538,17 @@ final class AppModel: ObservableObject {
         for v in sorted {
             guard generation == recordGeneration else { return }
             guard !store.hasSeen(v.bvid) else { continue }
+            if !drill && !store.settings.contentPreferences.allows(v.contentKind, publishedAt: v.pubdate) {
+                // 保存已确认的视频分类，避免它移出投稿最近一页后被误归为动态专属视频。
+                if v.contentKind.isVideo { _ = store.markSeen(v, state: .baseline) }
+                continue
+            }
 
             if !drill {
                 guard let up = store.data.ups.first(where: { $0.mid == v.mid && $0.enabled }) else { continue }
 
                 // 基线保护：明显早于该 UP 基线的视为历史视频，不推送
-                let floor = up.baselinePubdate > 0 ? up.baselinePubdate : Int(Date().timeIntervalSince1970) - 3600
+                let floor = up.notificationFloor
                 if v.pubdate <= floor {
                     _ = store.markSeen(v, state: .baseline)
                     continue
@@ -545,7 +606,7 @@ final class AppModel: ObservableObject {
         var anySuccess = false
         for n in notifiers {
             do {
-                try await n.send(text: text)
+                try await n.send(text: text, targetURL: v.videoURL)
                 guard generation == recordGeneration, store.hasSeen(v.bvid) else { return }
                 anySuccess = true
                 AppLog.info("已通过 \(n.name) 推送：\(v.bvid) \(v.title)")

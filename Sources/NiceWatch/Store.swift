@@ -82,8 +82,13 @@ final class Store: ObservableObject {
                             pubdate: v.pubdate,
                             detectedAt: Date(),
                             state: state)
-        data.seen[v.bvid] = rec
-        return rec
+        var typedRecord = rec
+        typedRecord.kind = v.kind
+        typedRecord.link = v.link
+        typedRecord.content = v.content
+        typedRecord.roomID = v.roomID
+        data.seen[v.bvid] = typedRecord
+        return typedRecord
     }
 
     func updateSeen(_ rec: SeenVideo) {

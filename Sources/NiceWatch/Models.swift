@@ -2,18 +2,24 @@ import Foundation
 
 // MARK: - B站数据模型
 
-/// 一条视频投稿（统一来自动态 feed 或空间投稿列表）
+/// 统一通知内容，保留原视频字段以兼容历史数据。
 struct VideoItem: Codable, Identifiable, Hashable {
     let bvid: String
     let title: String
     let author: String
     let mid: Int64
-    let pubdate: Int          // 秒级时间戳（+8 区本地时间语义，仅用于展示与比较）
+    let pubdate: Int          // Unix 秒级时间戳，展示时按本地时区转换
     let cover: String
+    var kind: ContentKind? = nil
+    var link: String? = nil
+    var content: String? = nil
+    var roomID: Int? = nil
+    var contentKind: ContentKind { kind ?? .upload }
     var coverURL: URL? { URL(string: cover.hasPrefix("//") ? "https:" + cover : cover) }
 
     var id: String { bvid }
-    var videoURL: URL? { URL(string: "https://www.bilibili.com/video/\(bvid)") }
+    var videoURL: URL? { URL(string: targetURL) }
+    var targetURL: String { link ?? "https://www.bilibili.com/video/\(bvid)" }
     var pubDate: Date { Date(timeIntervalSince1970: TimeInterval(pubdate)) }
 }
 
@@ -36,12 +42,18 @@ struct MonitoredUP: Codable, Identifiable, Hashable {
     var consecutiveFailures: Int?
     /// 在此时间之前不再请求该 UP（风控退避）
     var backoffUntil: Date?
+    var liveObservation: LiveObservation?
+
+    /// 新增来源也只推送开始监控之后的视频，避免把旧动态当成新投稿。
+    var notificationFloor: Int {
+        max(baselinePubdate, Int(addedAt.timeIntervalSince1970))
+    }
 
     var id: Int64 { mid }
     var faceURL: URL? { URL(string: face.hasPrefix("//") ? "https:" + face : face) }
 }
 
-/// 已发现视频的记录（去重 + 推送状态）
+/// 已发现内容的记录（去重 + 推送状态）
 struct SeenVideo: Codable, Identifiable, Hashable {
     enum State: String, Codable {
         case baseline        // 建立基线时已存在，不推送
@@ -61,9 +73,14 @@ struct SeenVideo: Codable, Identifiable, Hashable {
     var notifiedAt: Date?
     var attempts: Int = 0
     var lastError: String?
+    var kind: ContentKind? = nil
+    var link: String? = nil
+    var content: String? = nil
+    var roomID: Int? = nil
+    var contentKind: ContentKind { kind ?? .upload }
 
     var id: String { bvid }
-    var videoURL: URL? { URL(string: "https://www.bilibili.com/video/\(bvid)") }
+    var videoURL: URL? { URL(string: link ?? "https://www.bilibili.com/video/\(bvid)") }
     var pubDate: Date { Date(timeIntervalSince1970: TimeInterval(pubdate)) }
 }
 
@@ -102,6 +119,14 @@ struct Settings: Codable {
     var quietStartHour: Int? = nil
     var quietEndHour: Int? = nil
     var notifyOnLoginExpiry: Bool = true
+    var pushContent: PushContentPreferences? = nil
+    var liveTemplate: String? = nil
+    var contentPreferences: PushContentPreferences {
+        get { pushContent ?? PushContentPreferences() }
+        set { pushContent = newValue }
+    }
+    static let defaultLiveTemplate = "🔴 {author} 开播了\n{title}\n{url}"
+    var liveTemplateValue: String { liveTemplate ?? Self.defaultLiveTemplate }
     var template: String = "🎬 {author} 更新了\n《{title}》\n{url}"
 
     /// 当前唯一的通知通道：Bark
@@ -110,11 +135,21 @@ struct Settings: Codable {
     }
 
     func render(_ v: VideoItem) -> String {
-        template
+        let format: String
+        if v.contentKind == .live {
+            format = liveTemplateValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.defaultLiveTemplate : liveTemplateValue
+        }
+        else if !v.contentKind.isVideo && template == Settings().template {
+            format = "{author} 发布了{type}\n{content}\n{url}"
+        } else { format = template }
+        return format
             .replacingOccurrences(of: "{author}", with: v.author)
             .replacingOccurrences(of: "{title}", with: v.title)
-            .replacingOccurrences(of: "{bvid}", with: v.bvid)
-            .replacingOccurrences(of: "{url}", with: "https://www.bilibili.com/video/\(v.bvid)")
+            .replacingOccurrences(of: "{type}", with: v.contentKind.title)
+            .replacingOccurrences(of: "{content}", with: v.content ?? v.title)
+            .replacingOccurrences(of: "{room_id}", with: v.roomID.map(String.init) ?? "")
+            .replacingOccurrences(of: "{bvid}", with: v.contentKind.isVideo ? v.bvid : "")
+            .replacingOccurrences(of: "{url}", with: v.targetURL)
     }
 }
 

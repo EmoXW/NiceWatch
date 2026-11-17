@@ -24,7 +24,7 @@ enum ConfirmationAction: Identifiable {
         case .removeUP(let up):
             return "将停止监控「\(up.name)」，不再为其推送新投稿。已有记录会保留，之后可重新添加。"
         case .clearAllRecords:
-            return "将删除全部时间线和测试记录，保留登录、Bark key、设置与监控名单。监控将继续，仅推送清除后的新投稿。此操作无法撤销。"
+            return "将删除全部通知记录和测试记录，保留登录、Bark key、设置与监控名单。监控将继续，旧内容不再补推。此操作无法撤销。"
         }
     }
 
