@@ -7,6 +7,14 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
 
+    @Environment(\.controlActiveState) private var windowState
+
+    private func acknowledgeUpdates() {
+        if windowState == .key && model.unreadCount > 0 {
+            model.unreadCount = 0
+        }
+    }
+
     var body: some View {
         ZStack {
             SpectrumBackground()
@@ -20,6 +28,9 @@ struct RootView: View {
             .padding(24)
         }
         .frame(minWidth: 780, minHeight: 580)
+        .onAppear(perform: acknowledgeUpdates)
+        .onChange(of: windowState) { _ in acknowledgeUpdates() }
+        .onChange(of: model.unreadCount) { _ in acknowledgeUpdates() }
         .spectrumConfirmation(action: model.confirmation,
                               onCancel: { model.confirmation = nil },
                               onConfirm: { model.confirmAction() })
